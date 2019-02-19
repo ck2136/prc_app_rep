@@ -1,0 +1,228 @@
+---
+title: "TUG Predictive Analytics Report"
+author: "Chong H. Kim"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+    bookdown::html_document2:
+        toc: true
+        toc_float: true
+---
+
+# Introduction
+
+This is the markdown file that explains the steps for the time to up and go predictive analysis.
+
+Steps are as follows:
+
+1. Data Import and Check
+2. Use Brokenstick model to predict 90 day timed-up-and-go (TUG) 
+3. Predict 90 day TUG based om preoperative markers (i.e. age, gender, and etc) using predictive mean matching (i.e. linear model) in order to match patients that have closest prediction. These 90 day TUG is obtained only for the purposes of selecting patients for the GAMLSS regression for "close-to-me" matched regression.
+4. GAMLSS regression based on $n$-matches selected. The $n$ will be selected based on cross validation. Additionally, the GAMLSS hyperparameters will be selected based on cross validation.
+
+Next steps will be adjusted according to our wednesday meetings.
+
+# Methods
+
+## Data Import and Check
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, error = FALSE, message=FALSE, fig.width=10, fig.height=9, fig.align='center'
+                      )
+```
+We need a few libraries to be loaded. Specifically `gamlss` and `brokenstick` are the libraries that will be used for predicting the TUG and `dplyr` and `data.table` for data import.
+
+### Import Data
+```{r library_df}
+rm(list=ls())
+library(gamlss)
+library(brokenstick)
+library(dplyr)
+library(data.table)
+library(readxl)
+library(memoise)
+full  <- readxl::read_xlsx("../data/TUG_070118.xlsx")
+```
+
+```{r imp_df_2}
+head(full)
+```
+```{r imp_full_3}
+summary(full)
+```
+### Clean Data
+
+Here we want to remove rows where key measures are missing. note: it would be nice to automate this in the future where the user specifies the outcomes of interest and the timeframe
+
+```{r cln_df_1}
+# remove na TUG
+# make 3 datasts, traininig (pre and post), test 
+exclude <- full %>% filter(tug < 2 | (tug > 70 & time > 3)) %>% dplyr::select(patient_id)
+full <- full %>%
+    filter(!patient_id %in% exclude$patient_id)
+train <- full %>% filter(train_test == 1)
+test <- full %>% filter(train_test == 2)
+```
+```{r cln_df_2}
+# quick data check
+# make sure there aren't any missing data and etc
+summary(full) ;  sapply(full, function(x) {
+                          table(is.na(x))})
+
+# train pre data
+train_pre <- train %>%
+    filter(time < 0)
+# train post data select only days beyond 3 bc the 2nd day estimates are all ove rthe place.
+train_post  <- train %>%
+    filter(time > 3)
+
+trest_post  <- test %>%
+    filter(time > 3)
+```
+
+## Spaghetti Plot
+```{r spaghetti, fig.cap="Full Data Time since Surgery vs. TUG"}
+library(ggplot2)
+ggplot(full, aes(x=time, y=tug)) +
+    geom_line() + guides(colour=FALSE) + xlab("Time") +
+    ylab("TUG") + aes(colour = factor(patient_id)) + ggtitle("Full data Plot") +
+    geom_smooth(se=FALSE, colour="black", size=2)
+```
+
+```{r spaghetti2, fig.cap="Training Data Time since Surgery vs. TUG"}
+ggplot(train_post, aes(x=time, y=tug)) +
+    geom_line() + guides(colour=FALSE) + xlab("Time") +
+    ylab("TUG") + aes(colour = factor(patient_id)) + ggtitle("Training Post") +
+    geom_smooth(se=FALSE, colour="black", size=2)
+```
+
+## Brokenstick model and PMM
+
+The `preproc()` function takes care of brokenstick (i.e. LMM with 1st degree b-spline) and pmm (i.e. linear model with stepwise variable selection). The example case here with TUG as the outcome is to predit TUG outcome at $90$ days after surgery using brokenstick model then use predictive mean matching with the predicted $90$ day TUG outcome to find similar patients. In the below dataset, we have column `Fitted` which corresponds to the `pmm()` fitted outcome and patients arranged according to lowest to highest (or vice-versa) indicating patients with similar outcomes arranged in such manner.
+
+```{r bs_1}
+library(knitr)
+source("../code/functions.R")
+test_proc <- preproc(data=full, test_train=test,
+                filter_exp = "time > 3")
+test_proc$train_o %>% head %>%
+    kable(.)
+```
+
+Using this arranged dataset, we will match $n$ patients closest to each patients for all `r nrow(test_proc$train_o)` patients and utilize their original postoperative TUG values (by time) and fit a gamlss model with Normal distribution and Box-Cox-Cole-Green distribution (most flexible by specifying splines for location, scale, and shape parameters). , 
+
+
+Below is an example of fitting gamlss to all post-operative training dataset (reference model). We'll try using various distributions with GAIC as our model selection tool.
+```{r gamlss_1, message=FALSE, results='hide', cache=TRUE}
+
+ref1<-gamlss(tug~cs(time^0.5, df=3),
+             sigma.formula = ~cs(time^0.5, df=1),
+             data=test_proc$train_post, family=NO)
+ref2<-gamlss(tug~pb(time),
+             sigma.formula = ~pb(time),
+             data=test_proc$train_post, family=NO)
+ref3<-gamlss(tug~pb(time),
+             sigma.formula = ~pb(time),
+             data=test_proc$train_post, family=GA)
+ref4<-gamlss(tug~pb(time),
+             sigma.formula = ~pb(time), 
+             # no nu
+             data=test_proc$train_post, family=BCCGo)
+ref5<-gamlss(tug~pb(time),
+             sigma.formula = ~pb(time),
+             # yes nu
+             nu.formula = ~pb(time),
+             tau.formula=~pb(time),
+             data=test_proc$train_post, family=BCCGo)
+
+```
+
+```{r gamlss_2}
+GAIC(ref1, ref2, ref3, ref4, ref5, k = log(length(train_post$patient_id)))
+#GAIC(ref1, ref2,ref3, k = log(length(train_post$patient_id)))
+```
+It seems that based on the fitting of both shape and scale smoothing functions, the `GA` distribution seems to fit the data the best. quick plot:
+
+```{r gamlss_3}
+# based on the lowest AIC choose the one to plot
+ref <- list(ref1,ref2,ref3,ref4,ref5)[which.min(lapply(list(ref1,ref2,ref3,ref4,ref5), function(x){x$aic}))][[1]]
+par(mfrow=c(1,1))
+centiles(ref, xvar=train_post$time, cent=c(10,25,50,75,90), 
+         ylab= "Timed Up and Go", xlab="Days following surgery", 
+         xleg=150, yleg=90, col.centiles = c(2,6,1,6,2), xlim=range(0,125),
+         ylim=range(0,145),
+         lty.centiles = c(2,3,1,3,2),
+         lwd.centiles =c(2,2,2.5,2,2), points=T)
+```
+Given that the data will probably be updating continuously, this process will also have to be configured to get the optimal fitting model.
+
+Here are the centiles for $10\%, 25\%, 50\%, 75\%, and 90\%$. Below is the IQR's.
+
+```{r gamlss_5}
+mint<-min(train_post$time)
+maxt<-max(train_post$time)
+iqrfull<-centiles.pred(ref, type="centiles",  xname = "time", xvalues=c(mint:maxt),
+                   cent=c(25,75), plot=TRUE)
+iqrfull$iqr<-iqrfull$C75-iqrfull$C25
+mean(iqrfull$iqr)
+```
+
+
+## Cross Validation
+
+So we need to run the above algorithm for `r nrow(test_proc$train_o)` patients. The algorithm runs relatively fast when we specify Normal distribution but when we specify a BCCG distribution it takes time. 
+
+Again, the goal is the fit a GAMLSS model to the training post operative data to:
+
+1. Find the optimal number of matched patients (patient-like me) and 
+2. Find the optimal GAMLSS hyperparameters.
+
+```{r cv_1, fig.cap="Calibration, Bias, Coverage, and Precision Plots for GAMLSS w/ NO distribution"}
+# Here is the function the parameters for now will just be the nearest n from the patient being left out (from LOOCV).
+fin <- readRDS("../data/test.RDS") # normal dist
+fin1 <- readRDS("../data/test1.RDS") # BCCG
+library(data.table)
+plot_cal(plotobj=fin,
+          test_proc=test_proc,
+          pred_sum='mean',
+          obs_dist="gaussian"
+          )
+```
+
+```{r cv_2, fig.cap="Calibration, Bias, Coverage, and Precision Plots for GAMLSS w/ BCCGo distribution"}
+# Here is the function the parameters for now will just be the nearest n from the patient being left out (from LOOCV).
+plot_cal(plotobj=fin1,
+          test_proc=test_proc,
+          pred_sum='mean',
+          obs_dist="gaussian"
+          )
+```
+
+## Dropped Cases
+
+Since we are seeing some models not converging for some of the N's, we need to decide on the N matches where there are no dropped models because dropped models will essentially mean no predictions for that individual.
+
+```{r dropped_1}
+# Here is the function the parameters for now will just be the nearest n from the patient being left out (from LOOCV).
+library(kableExtra)
+library(tableone)
+library(labelled)
+library(dplyr)
+myfiles <- lapply(
+                  #list.files(path="./data/", pattern="f.+([0]).RDS$"), function(x){
+                  list.files(path="../data/", pattern="f.+(\\d).RDS$"), function(x){
+                  #list.files(path="./data/", pattern="f.+(_ns_)+(\\d).RDS$"), function(x){
+                      readRDS(paste0("../data/",x))
+                  }
+                  )
+names(myfiles) <- c("NO","GA","BCTo","BCPEo","BCCGo","NOns","GAns","BCTons","BCPEons","BCCGons")
+#names(myfiles) <- c("NO")
+#lapply(myfiles, function(x) { x$nearest_n })
+
+# Check Dropped Cases for each
+do.call(cbind, lapply(myfiles, function(x) { 
+           sapply(x$loocv_res, function(y) {
+                      y$dropped_cases
+                })
+          })
+) 
+```

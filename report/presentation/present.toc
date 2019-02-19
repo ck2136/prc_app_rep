@@ -1,0 +1,2 @@
+\beamer@sectionintoc {1}{First Test}{3}{0}{1}
+\beamer@sectionintoc {2}{Result}{4}{0}{2}

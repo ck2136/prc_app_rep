@@ -1,0 +1,25 @@
+\frametitle{Table 1}
+
+
+
+
+\begin{table}
+
+\caption{\label{tab:tab1}Table 1. Baseline Characteristics of Training and Testing Set}
+\centering
+\resizebox{\linewidth}{!}{
+\begin{tabular}[t]{lccr}
+\toprule
+  & Test & Train & p\\ & (N = 202, \# TUG Obs = 604) & (N = 397, \# TUG Obs = 1339) &  \\
+\midrule
+
+Age (years) (mean (sd)) & 65.90 (8.84) & 64.04 (8.43) & 0.012\\
+Gender = Male (\%) & 84 (41.6) & 185 (46.6) & 0.280\\
+BMI (kg/m\textasciicircum{}2) (mean (sd)) & 31.98 (6.20) & 31.33 (5.82) & 0.208\\
+Baseline TUG (sec) (mean (sd)) & 11.00 (5.04) & 9.98 (4.95) & 0.018\\
+\bottomrule
+\end{tabular}}
+\end{table}
+
+
+

@@ -1,0 +1,126 @@
+\begin{thebibliography}{10}
+\urlstyle{rm}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname doiprefix\endcsname\relax\def\doiprefix{DOI: }\fi
+\providecommand{\bibinfo}[2]{#2}
+\providecommand{\eprint}[2][]{\url{#2}}
+
+\bibitem{bernstein2014dramatic}
+\bibinfo{author}{Bernstein, J.} \& \bibinfo{author}{Derman, P.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Dramatic increase in total knee
+  replacement utilization rates cannot be fully explained by a disproportionate
+  increase among younger patients}}.
+\newblock {\emph{\JournalTitle{Orthopedics}}} \textbf{\bibinfo{volume}{37}},
+  \bibinfo{pages}{e656--e659} (\bibinfo{year}{2014}).
+
+\bibitem{bade2010outcomes}
+\bibinfo{author}{Bade, M.~J.}, \bibinfo{author}{Kohrt, W.~M.} \&
+  \bibinfo{author}{Stevens-Lapsley, J.~E.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Outcomes before and after total
+  knee arthroplasty compared to healthy adults}}.
+\newblock {\emph{\JournalTitle{journal of orthopaedic \& sports physical
+  therapy}}} \textbf{\bibinfo{volume}{40}}, \bibinfo{pages}{559--567}
+  (\bibinfo{year}{2010}).
+
+\bibitem{judd2012muscle}
+\bibinfo{author}{Judd, D.~L.}, \bibinfo{author}{Eckhoff, D.~G.} \&
+  \bibinfo{author}{Stevens-Lapsley, J.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Muscle strength loss in the lower
+  extremity following total knee arthroplasty}}.
+\newblock {\emph{\JournalTitle{American journal of physical medicine \&
+  rehabilitation/Association of Academic Physiatrists}}}
+  \textbf{\bibinfo{volume}{91}}, \bibinfo{pages}{220} (\bibinfo{year}{2012}).
+
+\bibitem{weiss2002functional}
+\bibinfo{author}{Weiss, J.~M.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{What functional activities are
+  important to patients with knee replacements?}}
+\newblock {\emph{\JournalTitle{Clinical Orthopaedics and Related Research}}}
+  \textbf{\bibinfo{volume}{404}}, \bibinfo{pages}{172--188}
+  (\bibinfo{year}{2002}).
+
+\bibitem{sanchez2018development}
+\bibinfo{author}{Sanchez-Santos, M.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Development and validation of a
+  clinical prediction model for patient-reported pain and function after
+  primary total knee replacement surgery}}.
+\newblock {\emph{\JournalTitle{Scientific reports}}}
+  \textbf{\bibinfo{volume}{8}}, \bibinfo{pages}{3381} (\bibinfo{year}{2018}).
+
+\bibitem{kennedy2008assessing}
+\bibinfo{author}{Kennedy, D.~M.}, \bibinfo{author}{Stratford, P.~W.},
+  \bibinfo{author}{Riddle, D.~L.}, \bibinfo{author}{Hanna, S.~E.} \&
+  \bibinfo{author}{Gollish, J.~D.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Assessing recovery and establishing
+  prognosis following total knee arthroplasty}}.
+\newblock {\emph{\JournalTitle{Physical therapy}}}
+  \textbf{\bibinfo{volume}{88}}, \bibinfo{pages}{22--32}
+  (\bibinfo{year}{2008}).
+
+\bibitem{mizner2005preoperative}
+\bibinfo{author}{Mizner, R.~L.}, \bibinfo{author}{Petterson, S.~C.},
+  \bibinfo{author}{Stevens, J.~E.}, \bibinfo{author}{Axe, M.~J.} \&
+  \bibinfo{author}{Snyder-Mackler, L.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Preoperative quadriceps strength
+  predicts functional ability one year after total knee arthroplasty.}}
+\newblock {\emph{\JournalTitle{The Journal of rheumatology}}}
+  \textbf{\bibinfo{volume}{32}}, \bibinfo{pages}{1533--1539}
+  (\bibinfo{year}{2005}).
+
+\bibitem{page2015distinguishing}
+\bibinfo{author}{Page, M.~G.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Distinguishing problematic from
+  nonproblematic postsurgical pain: a pain trajectory analysis after total knee
+  arthroplasty}}.
+\newblock {\emph{\JournalTitle{Pain}}} \textbf{\bibinfo{volume}{156}},
+  \bibinfo{pages}{460--468} (\bibinfo{year}{2015}).
+
+\bibitem{van2014curve}
+\bibinfo{author}{Van~Buuren, S.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Curve matching: a data-driven
+  technique to improve individual prediction of childhood growth}}.
+\newblock {\emph{\JournalTitle{Annals of Nutrition and Metabolism}}}
+  \textbf{\bibinfo{volume}{65}}, \bibinfo{pages}{227--233}
+  (\bibinfo{year}{2014}).
+
+\bibitem{kennedy2005assessing}
+\bibinfo{author}{Kennedy, D.~M.}, \bibinfo{author}{Stratford, P.~W.},
+  \bibinfo{author}{Wessel, J.}, \bibinfo{author}{Gollish, J.~D.} \&
+  \bibinfo{author}{Penney, D.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Assessing stability and change of
+  four performance measures: a longitudinal study evaluating outcome following
+  total hip and knee arthroplasty}}.
+\newblock {\emph{\JournalTitle{BMC musculoskeletal disorders}}}
+  \textbf{\bibinfo{volume}{6}}, \bibinfo{pages}{3} (\bibinfo{year}{2005}).
+
+\bibitem{naylor2014minimal}
+\bibinfo{author}{Naylor, J.~M.} \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Minimal detectable change for
+  mobility and patient-reported tools in people with osteoarthritis awaiting
+  arthroplasty}}.
+\newblock {\emph{\JournalTitle{BMC musculoskeletal disorders}}}
+  \textbf{\bibinfo{volume}{15}}, \bibinfo{pages}{235} (\bibinfo{year}{2014}).
+
+\bibitem{R-brokenstick}
+\bibinfo{author}{{van Buuren}, S.}
+\newblock \emph{\bibinfo{title}{brokenstick: Broken Stick Model for Irregular
+  Longitudinal Data}} (\bibinfo{year}{2017}).
+\newblock \bibinfo{note}{R package version 0.57.0}.
+
+\bibitem{R-gamlss}
+\bibinfo{author}{Stasinopoulos, M.} \& \bibinfo{author}{Rigby, B.}
+\newblock \emph{\bibinfo{title}{gamlss: Generalised Additive Models for
+  Location Scale and Shape}} (\bibinfo{year}{2018}).
+\newblock \bibinfo{note}{R package version 5.1-2}.
+
+\bibitem{stasinopoulos2007generalized}
+\bibinfo{author}{Stasinopoulos, D.~M.}, \bibinfo{author}{Rigby, R.~A.}
+  \emph{et~al.}
+\newblock \bibinfo{journal}{\bibinfo{title}{Generalized additive models for
+  location scale and shape (gamlss) in r}}.
+\newblock {\emph{\JournalTitle{Journal of Statistical Software}}}
+  \textbf{\bibinfo{volume}{23}}, \bibinfo{pages}{1--46} (\bibinfo{year}{2007}).
+
+\end{thebibliography}

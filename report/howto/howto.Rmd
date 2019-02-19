@@ -1,0 +1,1938 @@
+---
+title: "How to guide"
+author: "Chong H. Kim"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+    html_document:
+        toc: true
+        fig_caption: true
+        theme: flatly
+---
+
+
+# Introduction
+
+This guide is aimed for researchers that may want to create a reference chart of health outcomes trajectory (e.g. patient recovery after surgery) using predictive mean matching and gamlss. 
+
+# Timed Up & Go (TUG) prediction
+
+## Objective
+
+The functions that are described below are used in order to predict the trajectory of health outcomes, specifically TUG times for patients that undergo knee surgery. 
+
+## Data 
+
+We'll be using data provided by Dr. Andrew Kittelson which has Timed Up & Go (TUG) times for patients pre-op and post-op (knee surgery). The dataset contains other baseline variables and is set up in a long format. Let's take a look.
+```{r setup, echo=FALSE}
+library("knitr")
+knitr::opts_knit$set(root.dir = "../..")
+knitr::opts_chunk$set(warning=FALSE, message=FALSE)
+```
+
+
+```{r data, include=FALSE}
+# - - - - - - - - - - - - - - - - - - - - #
+# Environment configuration
+# - - - - - - - - - - - - - - - - - - - - #
+
+## Remove objects in workspace
+rm(list=ls())
+# if you are in the code folder get out!
+# load functions
+library("readxl") # for reading xlsx file
+full  <- readxl::read_xlsx("./data/TUG_070118.xlsx")
+source("./code/functions.R")
+```
+
+```{r datasetup}
+library(readxl) # for reading xlsx file
+library(dplyr) # for manipulating data 
+# load only the TUG dataset
+full  <- readxl::read_xlsx("./data/TUG_070118.xlsx")
+
+# exclude patients that have time > 200
+full <- full %>%
+    filter(time < 200)
+
+# Select patient id's that have TUG < 2 or > 70 after time > 3 
+exclude <- full %>% filter(tug < 2 | (tug > 70 & time > 3)) %>% dplyr::select(patient_id) %>%
+    bind_rows(
+              # need to exclude patients that have no post operative time beyond 2 from the train pre and possibly test pre because if people don't have post operative time in test it doesn't make sense
+              full %>%
+                  group_by(patient_id) %>%
+                  filter(max(time) < 3) %>%
+                  distinct(patient_id)
+              )
+
+full <- full %>%
+    filter(!patient_id %in% exclude$patient_id & time < 200)
+
+# add baseline 
+
+full <- baselinemk(full, "patient_id", "time")
+# Separate training and testing data
+
+train <- full %>% filter(train_test == 1)
+test <- full %>% filter(train_test == 2)
+
+# train pre data
+train_pre <- train %>%
+    filter(time < 0)
+# train post data select only days beyond 3 bc the 2nd day estimates are all ove rthe place.
+train_post  <- train %>%
+    filter(time > 3)
+
+test_post  <- test %>%
+    filter(time > 3)
+```
+
+```{r datafull}
+library("knitr")
+library("kableExtra")
+head(full) %>%
+    kable(., caption="Head of Full Data") %>%
+    kable_styling(full_width=F,bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+Let's also look at the full data spaghetti plot and the post-operative training data spaghetti plot. (*Note:* The data is split into training and testing where the training dataset is split again into pre-op and post-op. The pre-op training data is used in the predictive mean matching algorithm.) 
+
+```{r spaghetti}
+par(mfrow=c(1,2))
+library(ggplot2)
+ggplot(full, aes(x=time, y=tug)) +
+    geom_line() + guides(colour=FALSE) + xlab("Time") +
+    ylab("TUG") + aes(colour = factor(patient_id)) + ggtitle("Full data Plot") +
+    geom_smooth(se=FALSE, colour="black", size=2)
+```
+
+```{r spaghetti2}
+ggplot(train_post, aes(x=time, y=tug)) +
+    geom_line() + guides(colour=FALSE) + xlab("Time") +
+    ylab("TUG") + aes(colour = factor(patient_id)) + ggtitle("Training Post") +
+    geom_smooth(se=FALSE, colour="black", size=2)
+
+```
+
+```{r testprocfortab1, echo=FALSE}
+test_proc <- preproc(
+                     dff=full,  # specify full dataset name
+                     #dff=alldf, 
+                    split_var = 'train_test', # train test split variable
+                    #split_var = 'source', # for all_tka dataset
+                    trainval = 1, # training set value
+                    testval = 2, # test set value
+                     knots_exp = c(0, 14, 50, 90), # Specify broken stick knots
+                     out_time = 90,  # specify which timepoint to use 
+                     outcome = "tug", # specify outcome variable name
+                     #outcome = "knee_flex",
+                     time_var = "time", # specify time variable name
+                     pat_id = "patient_id", # specify patient id variable name
+                     varlist = c("age","gender","bmi"),  # need user to fill in var list otherwise will use all vars, categorical variables need to be factor or character
+                     filter_exp = NULL               
+                #filter_exp = "time > 5 & time < 200") # specify additional filter statement
+                     )
+```
+
+
+```{r tab1, echo=FALSE}
+tab1 <- readRDS("./data/tab1.RDS")
+library(tableone)
+library(labelled)
+testtotcount <- paste0("N = ",nrow(test_proc$test_o) ,", # of Obs = ",nrow(test_post))
+traintotcount <- paste0("N = ",nrow(test_proc$train_o), ", # of Obs = ", nrow(train_post))
+#tab1_out <- tab1 %>%
+tab1 %>%
+    mutate(gender = ifelse(gender == 2, "Female","Male"),
+           train_test = ifelse(train_test == 1, "Train", "Test")) %>%
+    set_variable_labels(gender = "Gender", age = "Age (years)", 
+                        bmi = "BMI (kg/m^2)", b_tug = "Baseline TUG (sec)") %>% 
+    CreateTableOne(vars = c("age","gender","bmi","b_tug"), factorVars = c("gender"), strata = c("train_test"), data=.) %>%
+    print(., quote = FALSE, noSpace = TRUE, printToggle = FALSE, varLabels = TRUE) %>%
+    .[, 1:3] %>%
+    kable(., caption = "Baseline Characteristics of Training and Testing Set", booktabs=TRUE, format="html" ) %>%
+    kable_styling(full_width=F,bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+## Functions
+
+So the steps for going through the prediction workflow is as such:
+
+1. Pre-process the data (broken stick modeling used for predicting outcome at time X; linear regression used for predictive mean matching)
+2. Find optimal nearest neighbor via fitting gamlss model within a  Leave One Out Cross-Validation framework
+3. Plot result of step 2.   
+
+### PreProcessing
+
+Let's take a look at the function specified as `preproc()`:
+
+```{r preprcfunc, eval=FALSE}
+preproc <- function(dff=full,                           # dff takes the full dataset 
+                    split_var = 'train_test',           # dff should have a train_test variable that indicates training/testing set
+                    trainval = 1,                       # indicator for training observations (in our case 1)
+                    testval = 2,                        # indicator for testing observations (in our case 2)
+                    filter_exp = NULL,                  # expression can be of form "time > 3"
+                    knots_exp = c(0, 14, 50, 90),       # specify knots for brokenstick modeling
+                    out_time = 90,                      # numeric variable where 90 day prediction is made
+                    outcome = "tug",                    # string of the outcome variable
+                    time_var = "time",                  # string of time variable
+                    pat_id = "patient_id",              # Need the patient_id column to be specified as "patient_id"
+                    varlist = c("age","gender","bmi"),  # need user to fill in var list otherwise will use all vars, categorical variables need to be factor or character
+                    pmmform = NULL,                     # formula for predictive mean matching (i.e. tug ~ age + gender + bmi)
+                   ...) {
+
+}
+```
+
+The `preproc()` function should be specified with each of the arguments to the parameters specified. The descritions are written as the comment in the code chunk above. The processed object is as such:
+
+```{r preprocres}
+test_proc <- preproc(
+                     dff=full,  # specify full dataset name
+                    split_var = 'train_test', # train test split variable
+                    trainval = 1, # training set value
+                    testval = 2, # test set value
+                     knots_exp = c(0, 14, 50, 90), # Specify broken stick knots
+                     out_time = 90,  # specify which timepoint to use 
+                     outcome = "tug", # specify outcome variable name
+                     time_var = "time", # specify time variable name
+                     pat_id = "patient_id", # specify patient id variable name
+                     varlist = c("age","gender","bmi"), # specify list of covariates for pmm
+                     filter_exp = NULL,
+                     pmmform = NULL, # formula as null
+                #filter_exp = "time > 5 & time < 200") # specify additional filter statement
+                     )
+```
+At the end of the function, we get an output of the `lm()` object that was used to predict the outcome values at time X. In our case we are predicting `tug` values at 90 day.
+
+```{r testprocobjcheck}
+str(test_proc, max.level=2)
+```
+As can be seen, there are essentialy 5 objects that are appended onto the `test_proc` object. 
+
+1. `test_proc$train_post`: Post-operative training data
+2. `test_proc$test_post`: Post-operative testing data
+3. `test_proc$train_o`: Predictive Mean Matched 90 day TUG data for patients in the training data
+4. `test_proc$test_o`: Predictive Mean Matched 90 day TUG data for patients in the testing data
+5. `test_proc$reg_obj`: Regression object from predictive mean matching (i.e. lm() object)
+
+
+Now let's have a closer look at the function:
+
+```{r preprocfuncall, eval=FALSE}
+preproc <- function(dff=full,
+                    split_var = 'train_test',
+                    trainval = 1,
+                    testval = 2,
+                   filter_exp = NULL,               # expression can be of form "time > 3"
+                   knots_exp = c(0, 14, 50, 90),    # select knots that are clinically relevat
+                   out_time = 90,                   # this variable has to be within the knots above
+                   outcome = "tug",
+                   time_var = "time",
+                   pat_id = "patient_id",           # Need the patient_id column to be specified as "patient_id"
+                   baseline_var = "baseline",       # pre-op/post-op indicator variable. preop: baseline = 1; postop: baseline = 0 or otherwise
+                   varlist = NULL,                  # need user to fill in var list otherwise will use all vars, categorical variables need to be factor or character
+                   pmmform = NULL,
+                   modelselect = FALSE,
+                   ...) {
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Load 'dplyr' for data manipulation
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    library(dplyr)
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # If baseline_var not  supplied, then stop
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    if(is.null(baseline_var)){
+        stop("baseline_var is NULL. 
+             Specify  baseline var as string. (e.g.baseline_var = 'baseline').
+             Utility function baselinemk() may be used to create baseline variable.
+             ")
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # If varlist supplied, then form dataframe that only contains 
+    # ID, Outcome, Time, train/test split variable, and Listed variables 
+    # else stop function
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    if(!is.null(varlist)){
+        dff <- dff %>%
+            .[,c(pat_id, outcome, time_var, split_var, baseline_var, varlist)]
+    } else {
+        stop("varlist not populated: specify varlist = c('var1','var2',...)")
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Split test/train by pre and post
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    df_train <-dff  %>% filter_(paste0(split_var, "==", trainval))
+    df_test <- dff %>% filter_(paste0(split_var, "==",testval))
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Split test/train by pre and post using baseline_var
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    #if (all(dff %>% arrange_(pat_id, time_var) %>% distinct_(pat_id, .keep_all = TRUE) %>% select_(time_var) %>% unlist %>% as.vector  < 0)) {
+        #pre_train_df <- df_train %>% filter_(paste0(time_var,"< 0"))
+        #pre_test_df <- df_test %>% filter_(paste0(time_var, "< 0"))
+    #} else if(all(dff %>% arrange_(pat_id, time_var) %>% distinct_(pat_id, .keep_all = TRUE) %>% select_(time_var) %>% unlist %>% as.vector == 0)){
+        #pre_train_df <- df_train %>% filter_(paste0(time_var,"== 0"))
+        #pre_test_df <- df_test %>% filter_(paste0(time_var, "== 0"))
+    #} else {
+        #stop("Inconsistencies in baseline time variable 
+             #(i.e. there are patients that have time values > 0).
+             #Either all baseline values need to be < 0 or == 0")
+    #}
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Split test/train by pre and post using baseline_var
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    pre_train_df <- df_train %>% filter_(paste0(baseline_var,"== 1"))
+    pre_test_df <- df_test %>% filter_(paste0(baseline_var, "!= 1"))
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Allow user to specify filter_exp
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    if(is.null(filter_exp)) {
+        post_train_df <- df_train %>% filter_(paste0(time_var, "> 3"))
+        post_test_df <- df_test %>% filter_(paste0(time_var, "> 3"))
+    } else {
+        post_train_df <- df_train %>% filter_(filter_exp)
+        post_test_df <- df_test %>% filter_(filter_exp) 
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # use brokenstick to predict values at knots_exp
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    library(brokenstick)
+    fit <- brokenstick(y = unlist(post_train_df[,outcome]),
+                       x = unlist(post_train_df[,time_var]),
+                       subjid = unlist(post_train_df[,pat_id]),
+                       knots = knots_exp
+                       )
+
+    est1 <- predict(fit, at="knots")
+    library("rlang")
+    library("tidyverse")
+    alldf <- left_join(
+                     est1[est1$x== out_time, ] %>%
+                         setNames(c(pat_id,"x","y","yhat","knot")) %>%
+                          dplyr::select_(pat_id, "yhat") %>%
+                          # need to change pat_id bc it is a factor when outputted through predict()
+                          mutate(!!pat_id := !!parse_quosure(paste0("as.numeric(as.character(",pat_id,"))")))
+                      ,
+                      pre_train_df,
+                      by = pat_id
+                      ) %>%
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # only keep complete cases 
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    .[complete.cases(.),]
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # lm() using gamlss package to get predicted outcome at out_time
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    library(gamlss)
+    #pmm <- gamlss(yhat ~ get(outcome) + age + gender + bmi,family=NO, data=alldf)
+    #pmm <- lm(yhat ~ get(outcome) + age + gender + bmi, data=alldf)
+    if(is.null(pmmform)){
+        pmm <- lm(formula(paste0("yhat ~ ", outcome, " + ", paste0(varlist, collapse="+"))), data=alldf)
+    } else {
+        pmm <- lm(formula = pmmform, data=alldf )
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # If modelselect = TRUE, use stepAIC to choose variables
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    if(modelselect){
+        library(MASS)
+        pmm <- stepAIC(pmm)
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Created dataset with fitted outcome at out_time for training patients
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    train_ordered <- alldf %>%
+        dplyr::select_(pat_id) %>%
+        cbind(pmm$fitted.values) %>%
+        rename_("id"= pat_id,
+               "Fitted"="`pmm$fitted.values`") %>%
+               #Fitted=`pmm$mu.fv`) %>%
+        arrange(Fitted)
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Created dataset with fitted outcome at out_time for testing patients
+    # Here we still use the linear model used to fit the training data (i.e. pmm)
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    
+    test_ordered <- pre_test_df %>% 
+        dplyr::select_(pat_id) %>%
+        bind_cols(pred = predict(pmm, data=alldf, 
+                                 newdata=pre_test_df %>% 
+                                            .[,c(outcome, varlist)]
+                             )
+        ) %>%
+        rename_("id" = pat_id) %>%
+        arrange(pred)
+
+    return(list(train_post = post_train_df, 
+                train_o =  train_ordered,
+                reg_obj = pmm,
+                test_post = post_test_df, 
+                test_o =  test_ordered)
+    )
+}
+
+```
+
+
+### Nearest Neighbor Tuning using GAMLSS and LOOCV
+
+The `loocv_function()` takes the preprossed object (i.e. `test_proc`) and runs through a sequence specified by the user to determine the optimal nearest neighbor number: 
+
+```{r loocvnoeval, eval=FALSE}
+loocv_function <- function(nearest_n = seq(20,150,by=10),   # enter vector of numeric values to test as optimal nearest neighbor
+                           dist_fam = NULL,                 # distribution family for gamlss (for location, shape, and scale)
+                           train_post = train_post,         # train_post from `test_proc$train_post`
+                           ord_data = ordered,              # train_o from `test_proc$train_o`
+                           test_post = test_post,           # test_post from `test_proc$test_post`
+                           test_o = test_o,                 # test_o from `test_proc$test_o`
+                           outcome,                         # outcome (i.e. "tug")
+                           time_elapsed,                    # time (i.e. "time")
+                           plot = FALSE,                    # shall we plot the predicted curves for each nearest neighbor?
+                           time_window = c(min(min(test_proc$train_post$time), # specify time window for prediction using gamlss
+                                               min(test_proc$test_post$time)),
+                                           max(max(test_proc$train_post$time),
+                                               max(test_proc$test_post$time))),
+                           interval=NULL,                   # enter numeric value to skip # of patients by (default = 0)
+                           cs=FALSE,                        # shall we use cubic spline vs b-spline in gamlss?
+                           dfspec=NULL,                     # degress of freedom if NULL then all default to 1
+                           d_f_m=1.8, ptr_m=1,              # if dfspec=TRUE, then specify location(m)
+                           d_f_s=1.2,                       # scale(s), 
+                           d_f_n=1,                         # skewness(n),
+                           d_f_t=1,                         # kurtosis(t)
+                           thresh_val = 50,                 # threshold value for bias. If any of the predictoin greater than threshold value then it will be ignored
+                           printtrace=FALSE,                # print gamlss outputs in console?
+                           userchoose=FALSE,                # allow user to choose the optimal nearest neighbor number
+                           seed=1234,                       # same as set.seed(), used for sampling 
+                           ...) {
+
+    ...
+}
+```
+
+The actual evaluation of the function and instantiating the object (as `fin`) is as such:
+
+```{r loocvactual, eval=FALSE}
+fin <- loocv_function(nearest_n = seq(35,35,1),
+                      train_post = test_proc$train_post,
+                      ord_data = test_proc$train_o,
+                      outcome = "tug",time_elapsed = "time",
+                      cs=TRUE,
+                      dfspec=TRUE,
+                      d_f_m=3, ptr_m=0.5,
+                      d_f_s=1,
+                      dist_fam = NO
+                      )
+```
+
+Since it takes a bit of time, I didn't evaluate the above code chunk but had it saved as a `.RDS` file. Let's see what it looks like:
+
+```{r loocvacteval}
+fin <- readRDS("./data/fin_NO_35_cs_dfspec.RDS")
+str(fin, max.level=2)
+```
+
+The object created by running the `loocv_function()` contains information necessary for evaluation of the performance of the optimal nearest neighbor. There's a lot of information stored but basically the performance measures are stored in `fin$loocv_res$nearest_XX`:
+
+```{r loocvobjperf}
+str(fin$loocv_res$nearest_35, max.level=1)
+```
+
+Using this object we can plot the performance results. But before, let's take a look at the function:)
+
+```{r loocvfunctionclose, eval=FALSE}
+loocv_function <- function(nearest_n = seq(20,150,by=10), # number to play with 
+                           dist_fam = NULL, # for gamlss distribution
+                           train_post = train_post, 
+                           ord_data = ordered, 
+                           test_post = test_post, 
+                           test_o = test_o,  # datasets
+                           outcome, time_elapsed, plot = FALSE,
+                           time_window = c(min(min(test_proc$train_post$time),min(test_proc$test_post$time)),max(max(test_proc$train_post$time),max(test_proc$test_post$time))),
+                           interval=NULL,
+                           cs=FALSE,
+                           dfspec=NULL,
+                           d_f_m=1.8, ptr_m=1,
+                           d_f_s=1.2,
+                           d_f_n=1,
+                           d_f_t=1,
+                           thresh_val = 50,
+                           printtrace=FALSE,
+                           userchoose=FALSE,
+                           seed=1234,
+                           ...) {
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # load data.table for rbindlist(): binding multiple lists of performance 
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    library("data.table")
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # Setting spline option
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    if(cs){
+        if(is.null(dfspec)) {
+            spl=paste0("cs(")
+            spls=paste0("cs(")
+            spln=paste0("cs(")
+            splt=paste0("cs(")
+        } else {
+            spl=paste0("cs(df=",d_f_m,",")
+            spls=paste0("cs(df=",d_f_s,",")
+            spln=paste0("cs(df=",d_f_n,",")
+            splt=paste0("cs(df=",d_f_t,",")
+        }
+    } else {
+        spl="pb("
+    }
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # Setting distribution for GAMLSS
+    # If NULL then use NO as default
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    if(is.null(dist_fam)) {
+
+        # - - - - - - - - - - - - - - - - - - - - - # 
+        # Reference gamlss fitting 
+        # - - - - - - - - - - - - - - - - - - - - - # 
+        message("Distribution of GAMLSS not chosen")
+        message("Will determine based on Normal, Gamma, and Box Cox Cole and Green")
+
+        ref1<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m,")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    data=train_post, family=NO,
+                    #gamlss control
+                    ...)
+        ref2<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m,")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    data=train_post, family=GA,
+                    #gamlss control
+                    ...)
+        ref3<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    nu.formula = as.formula(paste0(" ~ ",spln, time_elapsed, ")")),
+                    data=train_post, family=BCCGo,
+                    #gamlss control
+                    ...)
+        ref4<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    nu.formula = as.formula(paste0(" ~ ",spln, time_elapsed, ")")),
+                    data=train_post, family=BCTo,
+                    #gamlss control
+                    ...)
+        ref5<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    nu.formula = as.formula(paste0(" ~ ",spln, time_elapsed, ")")),
+                    data=train_post, family=BCPEo,
+                    #gamlss control
+                    ...)
+        # here the BCCGo distribution with tau is intentionally left out bc the fit is good but not as when we jsut do the nu
+        #ref5<-gamlss(eval(as.formula(paste0(outcome," ~ ", "pb(", time_elapsed, ")"))),
+                    #sigma.formula = as.formula(paste0(" ~ ", "pb(", time_elapsed, ")")),
+                    #nu.formula = as.formula(paste0(" ~ ", "pb(", time_elapsed, ")")),
+                    #tau.formula = as.formula(paste0(" ~ ", "pb(", time_elapsed, ")")),
+                    #data=train_post, family=BCCGo)
+
+        ref <- list(ref1,ref2,ref3,ref4,ref5)[which.min(lapply(list(ref1,ref2,ref3,ref4,ref5), function(x){x$aic}))][[1]]
+    } else if(length(dist_fam()$parameters) == 2) {
+        ref<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    data=data.frame(train_post), family=dist_fam,
+                    #gamlss control
+                    ...)
+    } else if(length(dist_fam()$parameters) == 3) {
+        ref<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    nu.formula = ~1,
+                    data=train_post, family=dist_fam,
+                    #gamlss control
+                    ...)
+    } else if(length(dist_fam()$parameters) == 4) {
+        ref<-gamlss(eval(as.formula(paste0(outcome," ~ ",spl, time_elapsed,"^",ptr_m, ")"))),
+                    sigma.formula = as.formula(paste0(" ~ ",spls, time_elapsed, ")")),
+                    nu.formula = ~1,
+                    tau.formula = ~1,
+                    data=train_post, family=dist_fam,
+                    ...
+                    )
+    }
+    gamlss_dist <- ref$family[2]
+
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # Full training post operative data fitting (i.e reference data) with GAMLSS 
+    # - - - - - - - - - - - - - - - - - - - - - # 
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # Specify time_window if NULL for GAMLSS centiles prediction
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    if(is.null(time_window)){
+        mint <- min(min(train_post[, time_elapsed]), min(test_post[, time_elapsed]))
+        maxt <- max(max(train_post[, time_elapsed]), max(test_post[, time_elapsed]))
+        iqrfull <- centiles.pred(ref, type='centiles', xname = time_elapsed, xvalues=c(mint:maxt),
+                                data = train_post,
+                                cent=c(25,75), plot=FALSE)
+    } else {
+        iqrfull <- centiles.pred(ref, type="centiles", xname = time_elapsed, xvalues=c(time_window[1]:time_window[2]),
+                                 data = train_post,
+                                 cent=c(25,75), plot=FALSE)
+    }
+    iqrfull$iqr<-iqrfull$C75-iqrfull$C25
+
+    # - - - - - - - - - - - - - - - - - - - - - # 
+    # NEAREST NEIGHBOR MATCHING
+    # - - - - - - - - - - - - - - - - - - - - - # 
+
+    # Outerloop will iterate through a list of nearest_n numbers
+    # Innerloop will iterate through all patients and store the result of the whole iteration into an array
+    # nearest neighbor should be an even number for at least those that aren't edge cases
+
+    
+    # iterate through the nearest_n list calculate bias coverage for each iteration
+    # for e.g. if we go form 10:100 by 10's we will have a list with 10 results 
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # Match training and testing patients based on minimum difference in the predicted outcome at out_time 
+    # Need this to get test data predictions
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    temp <- data.frame(train_id = sapply(1:length(test_o$pred), function(x) {
+                                             ord_data[which.min(abs(test_o$pred[x] - ord_data$Fitted)), "id"]
+                }), 
+                       test_id = test_o$id)
+
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # pat_level_func() is the loocv function 
+    # Patient level function this is the workhorse 
+    # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+    pat_level_func <- function(nearest=nearest_n, loocv=FALSE){
+
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Empty list that will be populated with performance measures and predictions
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        nn_arr = list()
+
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+        # Loop based on the nearest_n specified as user input 
+        # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+        for(n in nearest){
+            cnt = 0
+            misses = 0
+
+            dfList <- list()                #-- list to store training data's predicted C50 from gamlss model
+            dfList_test <- list()           #-- list to store testing data's predicted C50 from gamlss model
+            centilepred <- list()           #-- store all centile for later test set merging
+            biasvec<-vector()               #-- store mean of bias
+            rmsevec <- vector()             #-- store rmse vector
+            coveragevec<-vector()           #-- store coverage vector
+            coveragevec95a<-vector()        #-- store mean of the n coverage in vector
+            #coveragevec95<-vector()
+            iqrvec<-vector()
+            ninefiveconf <- data.frame()
+            precisionvec <- list()
+            crazymatch <- list()
+            zsc_list <- list()
+
+            # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            # iterate through all patients and match patients according to order. ord_data is the training data
+            # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+            if(is.null(interval)){
+                patlistint <- seq(1,length(ord_data$id))
+            } else {
+                patlistint <- seq(1,length(ord_data$id), by=interval)
+            }
+            for (i in patlistint) {
+                cnt = cnt + 1
+
+                # - - - - - - - - - - - - - - - - - - - - - - #
+                # Matching cases using absolute value of difference between Fitted values
+                # - - - - - - - - - - - - - - - - - - - - - - #
+
+                matches <- ord_data %>% 
+                    bind_cols(diff = abs(ord_data$Fitted[i] - ord_data$Fitted)) %>%
+                    arrange(diff) %>%
+                    dplyr::select(id) %>%
+                    .[-1,] %>%
+                    head(n = n) %>% unlist %>% as.vector
+
+                # - - - - - - - - - - - - - - - - - - - - - - #
+                # Matching by probability weighting by id based on n (1/n is prob weight)
+                # - - - - - - - - - - - - - - - - - - - - - - #
+                if(matchprobweight = TRUE){
+                    matchprob <- ord_data %>% 
+                        bind_cols(diff = abs(ord_data$Fitted[i] - ord_data$Fitted)) %>%
+                        arrange(diff) %>%
+                        dplyr::select(id) %>%
+                        .[-1,] %>%
+                        head(n = n) %>% cbind(weight=seq(n,1)/sum(seq(n,1))) %>%
+                        as.data.frame %>%
+                        rename(patient_id = 1)
+
+                    # create dataset with weights
+                    matchmodel <- train_post[train_post$patient_id %in% matches, ] %>%
+                        left_join(
+                                  matchprob
+                                  ) %>%
+                    dplyr::select_("patient_id", time_elapsed, outcome, "weight") 
+
+                    set.seed(seed)
+                    matchindex <- sample(x = seq_len(nrow(matchmodel)), size=nrow(matchmodel), prob=matchmodel$weight, replace=TRUE)
+
+                    # create final weighted matchdataset
+                    matchmodel <- matchmodel[matchindex,]
+                } else {
+                    matchmodel <- train_post[train_post$patient_id %in% matches, ]
+                }
+
+                # - - - - - - - - - - - - - - - - - - - - - - #
+                # Fit GAMLSS model to nearest n matches
+                # - - - - - - - - - - - - - - - - - - - - - - #
+
+                plm <- function() {
+
+                    out <- tryCatch(
+                                    {
+                                        message("TRY PART")
+                                        update(ref, data=matchmodel)
+
+                                    },
+                                    error = function(cond)
+                                    {
+                                        message(paste("ERROR in GAMLSS"))
+                                        message("ORIGINAL ERROR:")
+                                        message(cond)
+                                        return(NA)
+                                    },
+                                    warning=function(cond)
+                                    {
+                                        message(paste("GAMLSS WARNING"))
+                                        message("ORIIGNAL WARNING:")
+                                        message(cond)
+                                        return(NULL)
+                                    },
+                                    finally={
+                                        message("PROCESSING GAMLSS")
+                                        message("GAMLSS EOL SUCCESS")
+                                    }
+                                    )
+                    return(out)
+                }
+                plmr <- plm()
+
+                # if something wrong with iteration... then just don't do prediction it eats up all the memory anyways
+                if(typeof(plmr) != 'list') {
+
+                    misses = misses + 1 # increment number of misses
+                    message('Something wrong with plm model. Prediction not included')
+
+                } else {
+
+                    message(paste0("Getting predictions: "))
+
+                    # time window again
+                    if(is.null(time_window)){
+                        iqr<-centiles.pred(plmr, type="centiles",  xname = time_elapsed, xvalues=c(mint:maxt),
+                                           cent=c(2.5, 25, 50, 75, 97.5),
+                                           data=matchmodel,
+                                           plot=FALSE)
+                    } else {
+                        iqr<-centiles.pred(plmr, type="centiles",  xname = time_elapsed, xvalues=c(time_window[1]:time_window[2]),
+                                           cent=c(2.5, 25,50,75, 97.5),
+                                           data=matchmodel,
+                                           plot=FALSE)
+                    }
+
+
+                    # - - - - - - - - - - - - - - - - - - - - - - #
+                    # If not LOOCV, meaning if we're doing just predictions obtain test data bias, coverage and precision
+                    # - - - - - - - - - - - - - - - - - - - - - - #
+                    if(loocv!=TRUE){
+
+                        #
+                        # - - - Zscore on test set
+                        #
+
+                        #-- first need to make the test set such that 
+                        zscf <- function(){
+                            out <- tryCatch(
+                                            {
+                                                message("ZSCORE PREDICTION TRY PART")
+                                                message(paste0("PREDICTING FOR TRAIN = ",i))
+                                                testpred=data.frame()
+                                                # - - - - - - - - - - - - - - - - - - - - - - #
+                                                # Iterate through each testing obs(x) closest to the current train obs(i) 
+                                                # get predicted values using centles.pred()
+                                                # - - - - - - - - - - - - - - - - - - - - - - #
+                                                for(x in temp[temp$train_id %in% ord_data$id[c(i)], "test_id"]){
+                                                message(paste0("PREDICTING FOR TEST = ",x))
+                                                         testpred <- testpred %>% 
+                                                             bind_rows(
+                                                                       data.frame(
+                                                                                  zsc = centiles.pred(plmr, type="z-scores",
+                                                                                                      xname="time",
+                                                                                                      data=matchmodel,
+                                                                                                      xval=test_proc$test_post %>%
+                                                                                                          filter(patient_id %in% x) %>%
+                                                                                                          dplyr::select(time) %>%
+                                                                                                          unlist %>% as.vector,
+                                                                                                      yval=test_proc$test_post %>%
+                                                                                                          filter(patient_id %in% x) %>%
+                                                                                                          dplyr::select_(outcome) %>%
+                                                                                                          unlist %>% as.vector
+                                                                                                      ),
+                                                                                  test_id = rep(x, length(test_proc$test_post %>%
+                                                                                                          filter(patient_id %in% x) %>%
+                                                                                                          dplyr::select(time) %>%
+                                                                                                          unlist %>% as.vector
+                                                                                                      )),
+                                                                                  time = test_proc$test_post %>%
+                                                                                      filter(patient_id %in% x) %>%
+                                                                                      dplyr::select(time) %>%
+                                                                                      unlist %>% as.vector
+                                                                                  ))
+                                                }
+
+                                                return(testpred)
+                                            },
+                                            error = function(cond)
+                                            {
+                                                message(paste("ERROR in ZSCORE PREDICTION"))
+                                                message("ORIGINAL ERROR:")
+                                                message(cond)
+                                                return(NA)
+                                            },
+                                            warning=function(cond)
+                                            {
+                                                message(paste("GAMLSS WARNING"))
+                                                message("ORIIGNAL WARNING:")
+                                                message(cond)
+                                                return(NULL)
+                                            },
+                                            finally={
+                                                message("PROCESSING GAMLSS")
+                                                message("GAMLSS EOL SUCCESS")
+                                            }
+                                            )
+                            return(out)
+                        }
+                        zsc <- zscf()
+                        if(!is.data.frame(zsc)) {
+                            print(zsc)
+                            print(str(zsc))
+                            message(zsc)
+                            message(str(zsc))
+
+                            message('Something wrong with Z-SCORE prediction. Prediction not included')
+                            zsc_list[[cnt]] <- data.frame(zsc = NA,
+                                                          test_id = NA,
+                                                          time = NA
+                                                          )
+                        } else {
+                            zsc_list[[cnt]] <- zsc
+                        }
+
+                        # - - - - --  - - - - - - -#
+                        # Calculate and store Test-set bia, coverage, and precision
+                        # - - - - --  - - - - - - -#
+
+                        # -- IQR for the test data set
+
+                        iqr$iqr<-iqr$C75-iqr$C25
+                        iqrvec[cnt]<-mean(iqr$iqr)
+
+                        targetid<-temp[temp$train_id %in% ord_data$id[c(i)], "test_id"] # select the test id's that corresopnd to current train patient
+                        targetrec<-test_post[which(test_post$patient_id %in% targetid), ] # ge tthe trainging set post op data
+
+                        bias<-merge(iqr,targetrec, by=time_elapsed)
+                        bias$diff<-bias$C50-bias[,outcome]
+
+                        #store mean of bias and rmse in biasvec, rmsevec
+                        biasvec[cnt] <- mean(bias$diff)
+                        rmsevec[cnt] <- sqrt(sum(na.omit(bias$diff)^2)/length(na.omit(bias$diff)))
+
+                        # coverage prob based on IQR 50%
+                        bias$cov1<-bias[,outcome]-bias$C25
+                        bias$cov2<-bias$C75-bias[,outcome]
+                        bias$cov3<-ifelse(bias$cov1>0,1,0)
+                        bias$cov4<-ifelse(bias$cov2>0,1,0)
+                        bias$cov5<-bias$cov3+bias$cov4
+                        bias$coverage<-ifelse(bias$cov5>1,1,0)
+
+                        # store mean of the n coverage in vector
+                        coveragevec[cnt]<-mean(bias$coverage)
+
+
+                        if(any(bias$C50) > thresh_val){
+                            crazymatch[[cnt]] <- matchmodel
+                        } else {
+                            crazymatch[[cnt]] <- NA
+                        }
+
+                        #-- precision
+                        precisionvec[[cnt]] <-list(time= iqr[,time_elapsed], prec=iqr$iqr) 
+                        #-- store Testing C50
+                        dfList_test[[cnt]] <- test_post[which(test_post$patient_id %in% targetid), c("patient_id",time_elapsed,outcome)] %>%
+                        #train_post[train_post$patient_id == ord_data$id[c(i)],c("patient_id",time_elapsed,outcome)] %>% 
+                            left_join(
+                                      data.frame(time=iqr[,time_elapsed],c50 = iqr$C50) 
+                                      )
+
+                        #-- store Training C50
+                        dfList[[cnt]] <- train_post[which(train_post$patient_id %in% ord_data$id[c(i)]), c("patient_id",time_elapsed,outcome)] %>%
+                            left_join(
+                                      data.frame(time=iqr[,time_elapsed],c50 = iqr$C50) 
+                                      )
+                        #-- store all centile for later test set merging
+                        centilepred[[cnt]] <- cbind(ord_data$id[c(i)], iqr$time, iqr$C50)
+
+                    } else { # loocv = FALSE
+
+                        # - - - -
+                        # z-scores vector
+                        # - - - - 
+                        zscf <- function(){
+                            out <- tryCatch(
+                                            {
+                                                message("ZSCORE PREDICTION LOOCV TRY PART")
+                                                trainzsc <- data.frame(
+                                                                       zsc = centiles.pred(plmr, type="z-scores",
+                                                                                           xname=time_elapsed,
+                                                                                           data=matchmodel,
+                                                                                           xval=train_post[train_post$patient_id %in% ord_data$id[c(i)],time_elapsed][[1]],
+                                                                                           yval=train_post[train_post$patient_id %in% ord_data$id[c(i)],outcome][[1]]),
+                                                                       train_id = rep(ord_data$id[c(i)], length(train_post[train_post$patient_id %in% ord_data$id[c(i)],time_elapsed][[1]]))
+                                                                       ,
+                                                                       time = train_post[train_post$patient_id %in% ord_data$id[c(i)],time_elapsed][[1]]
+                                                                       )
+                                                return(trainzsc)
+
+                                            },
+                                            error = function(cond)
+                                            {
+                                                message(paste("ERROR in ZSCORE PREDICTION"))
+                                                message("ORIGINAL ERROR:")
+                                                message(cond)
+                                                return(NA)
+                                            },
+                                            warning=function(cond)
+                                            {
+                                                message(paste("GAMLSS WARNING"))
+                                                message("ORIIGNAL WARNING:")
+                                                message(cond)
+                                                return(NULL)
+                                            },
+                                            finally={
+                                                message("PROCESSING GAMLSS")
+                                                message("GAMLSS EOL SUCCESS")
+                                            }
+                                            )
+                            return(out)
+                        }
+                        zsc <- zscf()
+                        if(!is.data.frame(zsc)) {
+
+                            message('Something wrong with Z-SCORE prediction. Prediction not included')
+                            #zsc_list[[cnt]] <- list(train = NA)
+                            zsc_list[[cnt]] <- data.frame(zsc = NA,
+                                                          test_id = NA,
+                                                          time = NA
+                                                          )
+
+                        } else {
+                            zsc_list[[cnt]] <-  zsc
+                            #zsc_list[[cnt]] <- list(train = zsc)
+                            # below is when we want to also include the time point for the individual which is probably iportant... 
+                            #zsc_list[[cnt]] <- list(zsc = zsc, time = train_post[train_post$patient_id %in% ord_data$id[c(i)],time_elapsed][[1]])
+                        }
+
+                        message(paste0("Getting MLE  predictions: "))
+
+                        # - - - - - - - -- - - - - - - - - - - - - - - - - - - - - - - - #
+                        # code for storing either LOOCV result or extracting prediction #
+                        # - - - - - - - -- - - - - - - - - - - - - - - - - - - - - - - - #
+
+                        iqr$iqr<-iqr$C75-iqr$C25
+
+                        iqrvec[cnt]<-mean(iqr$iqr)
+                        targetid<-ord_data$id[c(i)]
+                        targetrec<-train_post[which(train_post$patient_id %in% targetid), ]
+
+                        bias<-merge(iqr,targetrec, by=time_elapsed)
+                        bias$diff<-bias$C50-bias[,outcome]
+
+                        #store mean of bias and rmse in biasvec, rmsevec
+                        biasvec[cnt] <- mean(bias$diff)
+                        rmsevec[cnt] <- sqrt(sum(na.omit(bias$diff)^2)/length(na.omit(bias$diff)))
+
+                        # coverage prob based on IQR 50%
+                        bias$cov1<-bias[,outcome]-bias$C25
+                        bias$cov2<-bias$C75-bias[,outcome]
+                        bias$cov3<-ifelse(bias$cov1>0,1,0)
+                        bias$cov4<-ifelse(bias$cov2>0,1,0)
+                        bias$cov5<-bias$cov3+bias$cov4
+                        bias$coverage<-ifelse(bias$cov5>1,1,0)
+
+                        # store mean of the n coverage in vector
+                        coveragevec[cnt]<-mean(bias$coverage)
+
+                        # coverage prob based on IQR 95%
+                        bias$cov1<-bias[,outcome]-bias$C2.5
+                        bias$cov2<-bias$C97.5 -bias[,outcome]
+                        bias$cov3<-ifelse(bias$cov1>0,1,0)
+                        bias$cov4<-ifelse(bias$cov2>0,1,0)
+                        bias$cov5<-bias$cov3+bias$cov4
+                        bias$coverage<-ifelse(bias$cov5>1,1,0)
+
+                        # store mean of the n coverage in vector
+                        coveragevec95a[cnt]<-mean(bias$coverage)
+
+                        #-- precision potentially remove later because this is 7.5mb per n so 7.5*14 ~ 100MB
+                        precisionvec[[cnt]] <-list(time= iqr[,time_elapsed], prec=iqr$iqr) 
+
+
+                    }
+
+                }
+                message(paste0("Current count is: ",cnt))
+                message(paste0("and Current n: ",n))
+            }
+
+            # - - - - - - - - - - - - - - - - - - - - - - - - -#  
+            # Code to create dataframe of the time and C75-C25 #
+            # - - - - - - - - - - - - - - - - - - - - - - - - -#  
+
+            message(paste0("Merging measures: "))
+            if(loocv!=TRUE){
+                message(paste0("Constructing Prediction Data"))
+ 
+                library(data.table)
+
+                nn_arr  <- list(
+                                pred_train = dfList, 
+                                pred_test = dfList_test, 
+                                biasvec = Filter(Negate(is.na),Filter(Negate(is.na), biasvec)),
+                                coveragevec = Filter(Negate(is.na),Filter(Negate(is.na), coveragevec)),
+                                centilerange = centilepred, 
+                                precisionvec=precisionvec, 
+                                zsc_list = zsc_list,
+                                rmse = rmsevec,
+                                crazymatch = crazymatch)
+
+
+            } else {
+
+                # Get rid of NA or NULL values that are created
+                All_list <- list(
+                                 #                          Filter(Negate(is.null),Filter(Negate(is.null), fin)),
+                                 Filter(Negate(is.na),Filter(Negate(is.na), biasvec)),
+                                 Filter(Negate(is.na),Filter(Negate(is.na), coveragevec)),
+                                 Filter(Negate(is.na),Filter(Negate(is.na), coveragevec95a)),
+                                 #Filter(Negate(is.na),Filter(Negate(is.na), coveragevec95)),
+                                 Filter(Negate(is.na),Filter(Negate(is.na), iqrvec)),
+                                 rmsevec,
+                                 zsc_list,
+                                 precisionvec = precisionvec,
+                                 misses 
+                                 )
+
+                # name the list objects
+                message(paste0("Assigning names"))
+                #names(All_list) <- c("bias","iqrcoverage","coverage95c","coverage95m","iqr","rmse", "dropped_cases")
+                names(All_list) <- c("bias","iqrcoverage","coverage95c","iqr","rmse","zscore","precisionvec", "dropped_cases")
+
+                message(paste0("Putting in the list in array slot: ",n))
+                # store the result of the n nearest_n result
+                nn_arr[[which(nearest == n)]] = All_list
+
+                # rename the list items to indicate nearestn
+                names(nn_arr)[which(nearest == n)] <- paste0('nearest_',n)
+
+                # Plotting
+                if (plot==TRUE){
+
+                    # create dataframe from compiled array for plotting
+
+                    df <- data.table(mrmse = sapply(nn_arr, function(x) {
+                                                        mean(x[['rmse']], na.rm=TRUE)
+                              }),
+                                     mcov = sapply(nn_arr, function(x) {
+                                                       mean(x[['iqrcoverage']], na.rm=TRUE)
+                              }),
+                                     mcov95c = sapply(nn_arr, function(x) {
+                                                          mean(x[['coverage95c']], na.rm=TRUE)
+                              }),
+                                     mzscore = sapply(nn_arr, function(x) {
+                                                          mean(x[['zscore']], na.rm=TRUE)
+                              }),
+                                     mmis = sapply(nn_arr, function(x) {
+                                                       mean(x[['dropped_cases']], na.rm=TRUE)
+                              })
+                                     )
+
+                    # add timepoints 
+                    df[,('nearest_n') := nearest_n]
+
+                    #plot(fin[,time_elapsed], fin$final, type="l",col="red", ylim=range(0.5:1.5), ylab="Normalized IQR", xlab="Days following Surgery", lwd=3)
+
+                    #Add the individual data
+                    #for(i in 1:nearest_n) {
+                    #lines(fin[,time_elapsed], fin[,paste0('d',i)], col="green")
+                }
+
+                # select of the n result, which has the smallest mean 'rmse' or selection criteria chosen by user
+
+            }
+
+        }
+
+        # after loocv finishes for all nearest_n, print which n is the lowest
+
+
+        # return either LOOCV array or final prediction array
+        return(nn_arr)
+    }
+
+    # run the LOOCV function 
+    pat_level_funcm <-pat_level_func
+
+    # if we're doing this on training data
+    loocv_test_result <- pat_level_funcm(nearest=nearest_n, loocv=TRUE)
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Calculation of Weighted Z-score, Coverage, and Bias to select Optimal N #
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    #opt_n_index <- which.min(as.vector(sapply(loocv_test_result, function(x) { mean(x$rmse, na.rm=TRUE)})))
+    if(length(nearest_n) != 1){
+
+        askuser <- function(){
+            n <- readline(prompt="Choose Nearest N: ")
+            if(n > max(nearest_n)-1){
+                message(paste0("Outside of the possible number of matches = ", max(nearest_n) - 1))
+                return(askuser())
+            }  else {
+                message(paste0("Using ", n, " number of mathces as desired."))
+            }
+            return(as.integer(n))
+        }
+
+        if(userchoose){
+            usernum <- askuser()
+            opt_n_index <- which(nearest_n == usernum)
+        } else {
+            opt_n_index <- loocvperf(loocv_test_result) %>% 
+                dplyr::select(totscore) %>% unlist(.) %>% which.min(.) %>% as.vector(.)
+        }
+
+        print("Lowest avg(RMSE) is: ")
+        print(paste0(mean(loocv_test_result[[opt_n_index]]$rmse, na.rm=TRUE), " from ", names(loocv_test_result))[[opt_n_index]])
+        print(paste0("Number of misses is: ",loocv_test_result[[opt_n_index]]$dropped_cases,' cases'))
+        print(paste0("Distribution chosen for matched GAMLSS: ", gamlss_dist))
+        print(paste0("Optimal Number of Matches is: ", nearest_n[[opt_n_index]]))
+        predict_test_result <- pat_level_funcm(nearest=nearest_n[opt_n_index], loocv=FALSE)
+        # extract prediction results from the optimum nearest n 
+        return(list(pred_res = predict_test_result,
+                    loocv_res =  loocv_test_result,
+                    loocv_score = loocvperf(loocv_test_result),
+                    nearest_n=nearest_n[opt_n_index]))
+    } else {
+        predict_test_result <- pat_level_funcm(nearest=nearest_n, loocv=FALSE)
+        return(list(pred_res = predict_test_result,
+                    loocv_res =  loocv_test_result,
+                    #loocv_score = loocvperf(loocv_test_result),
+                    nearest_n=nearest_n))
+    }
+
+}
+```
+
+### Performance Review
+
+We'll use the previous object `fin` and the function `plot_cal()` to plot bias, coverage, mean IQR difference and weighted total score: THe `plot_cal()` function takes a few arguments:
+
+```{r plot_caldescr, eval=FALSE}
+plot_cal <- function(plotobj,               # output of the `loocv_function()` object
+                     test_proc=test_proc,   # `test_proc` object
+                     outcome = "tug",       # outcome variable name
+                     filt=FALSE,            # If TRUE, then filter the bias, coverage, and mean IQR dif using filter_exp
+                     pred_sum="mean",       # prediction summary stats to use, default is mean
+                     obs_dist="gaussian",   # observed distribution options are poisson, gaussian, median
+                     #plot_by=seq(10,150,5),
+                     loocv=TRUE,            # If TRUE, plot result of loocv , else plot calibration
+                     filter_exp = NULL,     # filter_expression to filter certain values of the bias, coverage, and/or mean IQR dif
+                     plot_zscore=FALSE,     # plot zscore instead of raw bias 
+                     ...) {
+}
+```
+
+Plotting the LOOCV result:
+
+```{r plot_calloocv}
+plot_cal(
+         # Specify plotobj which is the object saved from the loocv_func()
+         # if multiple distributes were used then specify the distribution (e.g. myfiles$BCCGo) otherwise specify just the object (e.g. fin)
+         #plotobj=myfiles$BCCGo,
+         plotobj=fin,
+         # specify the processed file to match test data and train data for calibration
+          test_proc=test_proc,
+         # specify calibration plot x 
+          pred_sum='mean',
+          # specify observed distribution to use (default = "median")
+          obs_dist="median"
+          )
+```
+
+Let's now plot the calibration plot:
+
+```{r plot_calcali}
+plot_cal(plotobj=fin,
+          test_proc=test_proc,
+          outcome = 'tug',
+          pred_sum='mean',
+          obs_dist="median",
+          loocv = FALSE
+          )
+```
+
+A closer look at the function:
+
+```{r calplotdetail, eval=FALSE}
+# - - - - - - - - - - - - #
+# Plotting Function: (calibration, rmse and etc) ----
+# - - - - - - - - - - - - #
+
+plot_cal <- function(plotobj,
+                     test_proc=test_proc,
+                     outcome = "tug",
+                     filt=FALSE,
+                     pred_sum="mean",
+                     obs_dist="gaussian",
+                     #plot_by=seq(10,150,5),
+                     loocv=TRUE,
+                     filter_exp = NULL,
+                     plot_zscore=FALSE,
+                     ...) {
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Load libraries required for plotting and manipulating performance measures
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    library(ggplot2)
+    library(data.table)
+    library(broom)
+    library(tidyr)
+    # plotting function for 4 plots
+    # 1. Training set Calibration Plot
+    # 2. Test set Calibration Plot
+    # 3. Training set RMSE/Coverage Plot
+    # 4. Test set RMSE/Coverage Plot
+
+    # Main input: object from LOOCV function which spits out train data output
+    # plotobj$pred_res$pred contains the training set predictions in dataframe
+    # plotobj$pred_res
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Calibration Plot function for test and train
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    plot_func <- function(plotobj = plotobj, train = TRUE, filt=filt){
+        library(data.table)
+        val <- "c50"
+
+        # - - - - - - - - - - - - - - - - - - - - - - #
+        # when train=TRUE function plots:
+        # bias, coverage, mean IQR difference, and weighted score plot across the n choices of neighbors
+        # - - - - - - - - - - - - - - - - - - - - - - #
+        if(train == TRUE){
+
+            if(filt==TRUE){
+
+                temp <- rbindlist(plotobj$pred_res$pred_train) %>% filter_(filter_exp) # first one is c50
+            } else {
+                temp <- rbindlist(plotobj$pred_res$pred_train) # first one is c50
+            }
+
+            filtdf <- temp %>%
+                bind_cols(
+                          dec = temp %>% 
+                              dplyr::select_(val) %>%
+                              as.data.frame() %>%
+                              ntile(., 10)# create deciles
+                          ) %>%
+            left_join(
+                      temp %>%
+                          bind_cols(
+                                    dec = temp %>% 
+                                        dplyr::select_(val) %>%
+                                        as.data.frame() %>%
+                                        ntile(., 10)# create deciles
+                                    ) %>%
+                      group_by(dec) %>%
+                      summarise_(avg_val =  paste0("avg_val = ", pred_sum, "(",val,")"))
+                  ) 
+            if(any(is.na(filtdf$dec))){
+                print("NA's present in group")
+                filtdf <- filtdf %>%
+                    filter(!is.na(dec))
+            }
+
+            pred_tug <- temp  %>%
+                bind_cols(
+                          dec = temp %>% 
+                              dplyr::select_(val) %>%
+                              as.data.frame() %>%
+                              ntile(., 10)# create deciles
+                          ) %>%
+            group_by(dec) %>%
+            summarise_(avg_val = paste0("avg_val = ", pred_sum, "(",val,")"))
+
+
+        #summarise(avg_val = mean(get(val))) 
+
+        if(obs_dist == "gaussian" | obs_dist == "poisson") {
+            print(paste0("Distribution within Each Decile of Predicted", toupper(outcome)))
+            if(obs_dist == "gaussian") {
+                dffitpois <- filtdf %>%
+                    group_by(dec) %>%
+                    do(fitpois = glm(get(outcome) ~ 1, data= .))
+
+                dfpoiscoef <- tidy(dffitpois, fitpois)
+
+                # create poisson estimates and standard errors for each decile for plotting
+                print(paste0("Plot DF creation"))
+                plotdf <- pred_tug %>%
+                    left_join(dfpoiscoef %>% dplyr::select(dec, estimate, std.error)) %>%
+                    mutate(ul = estimate+1.96*std.error,
+                           ll = estimate-1.96*std.error) 
+            } else {
+                dffitpois <- filtdf %>%
+                    group_by(dec) %>%
+                    do(fitpois = glm(get(outcome) ~ 1, family=poisson(link="log"), data= .))
+
+                dfpoiscoef <- tidy(dffitpois, fitpois)
+
+                # create poisson estimates and standard errors for each decile for plotting
+                print(paste0("Plot DF creation"))
+                plotdf <- pred_tug %>%
+                    left_join(dfpoiscoef %>% dplyr::select(dec, estimate, std.error)) %>%
+                    mutate(
+                           ul = exp(estimate+1.96*std.error),
+                           ll = exp(estimate-1.96*std.error)) %>%
+                    mutate(estimate = exp(estimate))
+            }
+            # set minimum and maximum based on the range of predicted and observed TUG values
+            minc <- floor(min(plotdf$ll, plotdf$avg_val, na.rm=TRUE)) 
+            maxc <- ceiling(max(plotdf$ul, plotdf$avg_val, na.rm=TRUE)) 
+
+        } else { # for observed value as median and 95%CI for median
+            library(DescTools)
+            dffitmed <- filtdf %>%
+                group_by(dec) %>%
+                do(fitmed = MedianCI(.[,outcome][[1]], conf.level= 0.95,
+                                     method = "exact", R = 10000))
+                #do(fitpois = glm(tug ~ 1, data= .))
+
+
+            dfmedcoef <- tidy(dffitmed, fitmed)
+
+            plotdf <- pred_tug %>%
+                left_join(spread(dfmedcoef, names, -dec)) %>%
+                rename(ul = upr.ci,
+                       ll = lwr.ci)
+            # set minimum and maximum based on the range of predicted and observed TUG values
+            minc <- floor(min(plotdf$ll, plotdf$avg_val, na.rm=TRUE)) 
+            maxc <- ceiling(max(plotdf$ul, plotdf$avg_val, na.rm=TRUE)) 
+            #minc <- floor(min(plotdf[,val], plotdf[,outcome], na.rm=TRUE)) 
+            #maxc <- ceiling(max(boxplot.stats(plotdf[,val])$stats[5], boxplot.stats(plotdf[,outcome])$stats[5], na.rm=TRUE))*1.05
+        }
+
+
+
+            # plot observed vs. predicted TUG on decile of predicted TUG
+            if(obs_dist == "gaussian" | obs_dist == "poisson"){
+                if(obs_dist == "gaussian") {
+                    cptrain <-  ggplot(plotdf, aes(x = avg_val, y = estimate, ymin = estimate-1.96*std.error, ymax=estimate+1.96*std.error)) + geom_pointrange() + 
+                        #xlim(minc, maxc) + ylim(minc,maxc) + 
+                        geom_abline(slope=1, intercept=0) + 
+                        xlab(paste0("Predicted ",toupper(outcome))) + 
+                        ylab(paste0("Observed ",toupper(outcome))) 
+                } else {
+                    cptrain <-  ggplot(plotdf, aes(x = avg_val, y = estimate, ymin = ll, ymax=ul)) + geom_pointrange() + 
+                        #xlim(minc, maxc) + ylim(minc,maxc) + 
+                        geom_abline(slope=1, intercept=0) + 
+                        xlab(paste0("Predicted ",toupper(outcome))) + 
+                        ylab(paste0("Observed ",toupper(outcome))) 
+                }
+
+            
+            } else {
+                # median and IQR
+                cptrain <-  ggplot(plotdf, aes(x = avg_val,
+                                               ymin = ll, ymax=ul,
+                                               y = median,
+                                               )) + geom_pointrange() + 
+                    #xlim(minc, maxc) + ylim(minc,maxc) + 
+                    geom_abline(slope=1, intercept=0) + 
+                    xlab(paste0("Predicted ",toupper(outcome))) + 
+                    ylab(paste0("Observed ",toupper(outcome))) 
+            
+                #cptrain <-  ggplot(plotdf, aes_string(x = "avg_val",
+                                                      #y = outcome,
+                                                      #group = "avg_val"
+                                                      #)) + geom_boxplot(outlier.colour=NA) + 
+                    ##xlim(minc, maxc) + ylim(minc,maxc) + 
+                    #geom_abline(slope=1, intercept=0) + 
+                    #xlab("Predicted TUG") + 
+                    #ylab("Observed TUG")
+            }
+            cptrainzsc <-  ggplot(plotdf, aes_string(x = "avg_val",
+                                           y = "zsc",
+                                           group = "avg_val"
+                                           )) + geom_boxplot(outlier.colour=NA) + 
+                #xlim(minc, maxc) + ylim(minc,maxc) + 
+                geom_hline(yintercept=0) + 
+                xlab(paste0("Predicted ",toupper(outcome))) + 
+                ylab("Z-score")
+
+            mincz <- floor(min(plotdf$zsc, na.rm=TRUE)) 
+            maxcz <- ceiling(max(plotdf$zsc, na.rm=TRUE)) 
+
+            # correlation
+            traincor <- cor(temp %>% 
+                            dplyr::select_(outcome, "c50") %>%
+                            as.matrix, method="spearman") %>%
+                        .[1,2] %>%
+                        round(3) %>%
+                        paste0("r^2 ==", .)
+
+            # other performance measures
+            zscres <- loocvperf(plotobj$loocv_res)
+            test_perf <- zscres[which.min(zscres$totscore),c("zscore","coverage","precision")]
+
+            return(list(cptrain, minc, maxc, traincor, cptrainzsc, mincz, maxcz,tp=test_perf ))
+            #return(list(cptrain, minc, maxc))
+
+        } else { # for test set we need to merge from the full data
+
+            #-- add the z-score dataset 
+            #tempzsc <- rbindlist(lapply(plotobj$pred_res$zsc_list, list))[[1]][!is.na(rbindlist(lapply(plotobj$pred_res$zsc_list, list))) & !is.infinite(unlist(rbindlist(lapply(plotobj$pred_res$zsc_list, list))))]
+            #tempzsc <- rbindlist(lapply(plotobj$pred_res$zsc_list, function(x) {list( zsc = x)}), idcol = "patient_id")
+
+            #-- get id of train_df that has closests y90 value to test df
+            print("creating temp and test matching data")
+
+            temp <-  test_proc$test_post %>% 
+                dplyr::select_("patient_id", "time", outcome) %>%
+                left_join(
+                          test_proc$test_o %>%
+                              bind_cols(
+                                        train_id = test_proc$train_o$id[sapply(1:length(test_proc$test_o$pred), function(x) {
+                                                                                   which.min(abs(test_proc$test_o$pred[x] - test_proc$train_o$Fitted))                                         })]
+                                        ) %>% 
+                          dplyr::select(id, train_id) %>%
+                          rename(patient_id = id)
+                      ) %>%
+                rename(test_id = patient_id)  %>%
+                #-- join centiles.pred from the unique train id's that were selected based on minimum difference between y90 of train and test
+                left_join(
+                          data.frame(train_id = unique(test_proc$train_o$id[sapply(1:length(test_proc$test_o$pred), function(x) {
+                                                                                       which.min(abs(test_proc$test_o$pred[x] - test_proc$train_o$Fitted))
+})]) ) %>% 
+                          full_join(
+                                    rbindlist(lapply(plotobj$pred_res$centilerange, data.frame)) %>%
+                                        rename(train_id = 1,
+                                               time = 2,
+                                               C50 = 3))
+                          ,
+                          by = c("time","train_id") 
+                          ) 
+                #-- bind with decile
+                print("binding with decile")
+                print("filt df made in test")
+                filtdf <- temp %>%
+                    bind_cols(
+                              dec = temp %>%
+                                  dplyr::select(C50) %>%
+                                  as.data.frame() %>%
+                                  ntile(., 10)
+                              ) %>%
+                left_join(
+                          temp %>%
+                              bind_cols(
+                                        dec = temp %>%
+                                            dplyr::select(C50) %>%
+                                            as.data.frame() %>%
+                                            ntile(., 10)
+                                        ) %>%
+                          group_by(dec) %>%
+                          summarise_(avg_val = paste0("avg_val = ", pred_sum, "(C50)"))
+                      ) 
+                # merge zscore later on
+                #%>%
+                #left_join(
+                          #tempzsc
+                          #) %>%
+                #filter(!is.na(zsc))
+                if(any(is.na(filtdf$dec))){
+                    warning("NA's present in group")
+                    filtdf <- filtdf %>%
+                        dplyr::filter(!is.na(dec))
+                }
+
+                print(paste0("Predicting TUG values"))
+
+                pred_tug <-  temp %>%
+                    bind_cols(
+                              dec = temp %>%
+                                  dplyr::select(C50) %>%
+                                  as.data.frame() %>%
+                                  ntile(., 10)
+                              ) %>%
+                group_by(dec) %>%
+                summarise_(avg_val = paste0("avg_val = ", pred_sum, "(C50)"))
+
+
+            # use normal, poisson, or median/95% IQR
+            if(obs_dist == "gaussian" | obs_dist == "poisson") {
+                print(paste0("Distribution within Each Decile of Predicted TUG"))
+                library(broom)
+                if(obs_dist == "gaussian"){
+                    dffitpois <- filtdf %>%
+                        group_by(dec) %>%
+                        do(fitpois = glm(get(outcome)~ 1, data= .))
+                    dfpoiscoef <- tidy(dffitpois, fitpois)
+
+                    # create poisson estimates and standard errors for each decile for plotting
+                    print(paste0("Plot DF creation"))
+                    plotdf <- pred_tug %>%
+                        left_join(dfpoiscoef %>% dplyr::select(dec, estimate, std.error)) %>%
+                        mutate(ul = estimate+1.96*std.error,
+                               ll = estimate-1.96*std.error) 
+                } else {
+
+                    dffitpois <- filtdf %>%
+                        group_by(dec) %>%
+                        do(fitpois = glm(get(outcome)~ 1,family=poisson(link="log"), data= .))
+
+                    dfpoiscoef <- tidy(dffitpois, fitpois)
+
+                    # create poisson estimates and standard errors for each decile for plotting
+                    print(paste0("Plot DF creation"))
+                    plotdf <- pred_tug %>%
+                        left_join(dfpoiscoef %>% dplyr::select(dec, estimate, std.error)) %>%
+                        mutate(ul = exp(estimate+1.96*std.error),
+                               ll = exp(estimate-1.96*std.error)) %>%
+                        mutate(estimate = exp(estimate))
+                }
+
+
+                # set minimum and maximum based on the range of predicted and observed TUG values
+                minc <- floor(min(plotdf$ll, plotdf$avg_val, na.rm=TRUE)) 
+                maxc <- ceiling(max(plotdf$ul, plotdf$avg_val, na.rm=TRUE)) 
+
+            } else {
+                print("Median calculation")
+
+                library(DescTools)
+                print(
+                      filtdf %>% 
+                          head
+                )
+
+                dffitmed <- filtdf %>%
+                    group_by(dec) %>%
+                    do(fitmed = MedianCI(.[,outcome][[1]], conf.level= 0.95,
+                                         method = "exact", R = 10000, na.rm = TRUE))
+                    #do(fitpois = glm(tug ~ 1, data= .))
+
+                dfmedcoef <- tidy(dffitmed, fitmed)
+
+                plotdf <- pred_tug %>%
+                    left_join(spread(dfmedcoef, names, -dec)) %>%
+                    rename(ul = upr.ci,
+                           ll = lwr.ci)
+                # set minimum and maximum based on the range of predicted and observed TUG values
+                minc <- floor(min(plotdf$ll, plotdf$avg_val, na.rm=TRUE)) 
+                maxc <- ceiling(max(plotdf$ul, plotdf$avg_val, na.rm=TRUE)) 
+                #plotdf <- filtdf
+
+                ## set minimum and maximum based on the range of predicted and observed TUG values
+                #minc <- floor(min(plotdf$C50, unlist(plotdf[,outcome]), na.rm=TRUE)) 
+                #maxc <- ceiling(max(boxplot.stats(plotdf$C50)$stats[5], boxplot.stats(unlist(plotdf[,outcome]))$stats[5], na.rm=TRUE))*1.05
+            }
+
+
+            # plot observed vs. predicted TUG on decile of predicted TUG
+            if(obs_dist == "gaussian" | obs_dist == "poisson"){
+                if(obs_dist == "gaussian"){
+                    cptest <-  ggplot(plotdf, aes(x = avg_val, y = estimate, ymin = estimate-1.96*std.error, ymax=estimate+1.96*std.error)) + geom_pointrange() + 
+                        #xlim(minc, maxc) + ylim(minc,maxc) + 
+                        geom_abline(slope=1, intercept=0) + 
+                        xlab(paste0("Predicted ",toupper(outcome))) + 
+                        ylab(paste0("Observed ",toupper(outcome))) 
+                
+                } else {
+                    cptest <-  ggplot(plotdf, aes(x = avg_val, y = estimate, ymin = ll, ymax=ul)) + geom_pointrange() + 
+                        #xlim(minc, maxc) + ylim(minc,maxc) + 
+                        geom_abline(slope=1, intercept=0) + 
+                        xlab(paste0("Predicted ",toupper(outcome))) + 
+                        ylab(paste0("Observed ",toupper(outcome))) 
+
+                }
+
+            } else {
+
+                cptest <-  ggplot(plotdf, aes(x = avg_val,
+                                              ymin = ll, ymax=ul,
+                                              y = median
+                                              #y = estimate
+                                              )) + 
+                    geom_pointrange() + 
+                    #xlim(minc, maxc) + ylim(minc,maxc) + 
+                    geom_abline(slope=1, intercept=0) + 
+                    xlab(paste0("Predicted ",toupper(outcome))) + 
+                    ylab(paste0("Observed ",toupper(outcome))) 
+
+                #cptest <-  ggplot(plotdf, aes_string(x = "avg_val",
+                                              #y = outcome,
+                                              #group = "avg_val"
+                                              #)) + 
+                    #geom_boxplot(outlier.colour=NA) + 
+                    ##xlim(minc, maxc) + ylim(minc,maxc) + 
+                    #geom_abline(slope=1, intercept=0) + 
+                    #xlab("Predicted TUG") + 
+                    #ylab("Observed TUG")
+
+            }
+            cptestzsc <-  ggplot(plotdf, aes_string(x = "avg_val",
+                                           y = "zsc",
+                                           group = "avg_val"
+                                           )) + geom_boxplot(outlier.colour=NA) + 
+                #xlim(minc, maxc) + ylim(minc,maxc) + 
+                geom_hline(yintercept=0) + 
+                xlab(paste0("Predicted ",toupper(outcome))) + 
+                ylab("Z-score")
+
+            mincz <- floor(min(plotdf$zsc, na.rm=TRUE)) 
+            maxcz <- ceiling(max(plotdf$zsc, na.rm=TRUE)) 
+
+            # correlation
+            testcor <- cor(temp %>% 
+                            dplyr::select_(outcome, "C50") %>%
+                            as.matrix, method="spearman", use="complete.obs") %>%
+                        .[1,2] %>%
+                        round(3) %>%
+                        paste0("r^2 ==", .)
+
+            # other performance measures
+            test_perf <- extvalid(plotobj, test_proc)
+
+            return(list(cptest, minc, maxc, testcor, cptestzsc, mincz, maxcz, tp=test_perf))
+            #return(list(cptest, minc, maxc))
+
+        }
+    }
+
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Instantiate all plot objects for viewing
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    library(cowplot)
+    #-- calibration plots only
+    if(loocv){
+
+        # - - - - - - - - - - - - - - - - - - - - - - #
+        # RMSE/Coverage Plot function for test and train
+        # - - - - - - - - - - - - - - - - - - - - - - #
+
+        listtodf <- function(listfile){
+            temp <- lapply(listfile, function(x) {
+                               c(mean(x$bias, na.rm=TRUE),
+                                 mean(x$iqrcoverage, na.rm=TRUE),
+                                 mean(x$coverage95c, na.rm=TRUE),
+                                 mean(rbindlist(x$zscore)$zsc[!is.na(rbindlist(x$zscore)$zsc) & !is.infinite(rbindlist(x$zscore)$zsc)]),
+                                 mean(x$iqr, na.rm=TRUE),
+                                 mean(x$rmse, na.rm=TRUE),
+                                 x$dropped_cases)
+                            })
+            temp <- as.data.frame(temp)
+
+            colnames(temp) <- regmatches(names(plotobj$loocv_res), regexpr("\\d+",names(plotobj$loocv_res)))
+            #colnames(temp) <- paste0(plot_by)
+            rownames(temp) <- paste0(c('bias','iqrcoverage','coverage95c','zscore','iqrdif','rmse','dropped_cases'))
+            temp$measure  <-  c('bias','iqrcoverage','coverage95c','zscore','iqrdif',"rmse","dropped_cases")
+            library(reshape2)
+            temp <- melt(temp, id.vars=c("measure"))
+            temp <- temp %>%
+                mutate(variable = as.numeric(as.character(variable))) %>%
+                rename(nearest_n = variable)
+
+            return(temp)
+
+        }
+
+        tmp1 <-listtodf(plotobj$loocv_res) 
+
+        train_bias <- ggplot(tmp1 %>%
+                             filter(
+                                    #abs(value) < 50,
+                                    #measure == 'bias' | measure == 'rmse' | measure == 'zscore') 
+                                    #measure == 'bias' | measure == 'zscore') 
+                                    measure == 'zscore') 
+                             ) + 
+            xlab("Matches (N)") + ylab("Bias") +
+            geom_point(aes(x=nearest_n, y=value, colour=measure)) + 
+            theme_bw()  + theme(legend.position="none")
+
+    # Coverage (Excluding extreme measures)
+    train_cov <- ggplot(tmp1 %>%
+                        filter(
+                               #nearest_n > 10,
+                               measure == 'iqrcoverage') 
+                               #measure == 'iqrcoverage' | measure == 'coverage95c' ) 
+                        ) + 
+        geom_point(aes(x=nearest_n, y=value, colour=measure)) + 
+        xlab("Matches (N)") + ylab("Coverage") +
+        ylim(min(tmp1 %>% 
+                 filter(measure == 'iqrcoverage') %>%
+                 dplyr::select(value) %>%
+                 unlist %>%
+                 as.vector) * 0.95 ,
+             max(tmp1 %>%
+                 filter(measure == 'iqrcoverage') %>%
+                 dplyr::select(value) %>%
+                 unlist %>%
+                 as.vector) * 1.05)+
+        #ylim(0.3,1)+
+        #scale_colour_manual(labels=c("95% IQR Coverage","50% IQR Coverage"), values=c("blue","red")) +
+        scale_colour_manual(labels=c("50% IQR Coverage"), values=c("blue")) +
+        theme_bw() + theme(legend.position="none")
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Precision Plot: Mean IQR dif by Nearest N
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    ppdf <- rbindlist(lapply(plotobj$loocv_res, function(y) {
+                                 rbindlist(lapply(y$precisionvec, function(x) {
+                                                      list(meaniqrdif = mean(x$prec, na.rm=TRUE))
+}))
+                               }), idcol='nearest_n')
+    #- change values in id column to numeric
+    ppdf <- ppdf %>%
+        mutate(nearest_n = as.numeric(gsub("nearest_", "", nearest_n))) 
+    ppdf_means <- ppdf %>%
+        group_by(nearest_n) %>%
+        summarise(meaniqrdif=mean(meaniqrdif, na.rm=TRUE))
+    #-- ggplot boxplots by the id
+    #ppp <- ggplot(data=ppdf,aes(y=meaniqrdif, x=as.factor(nearest_n))) + geom_boxplot() +
+        #stat_summary(fun.y=mean, colour="darkred", geom="point", shape=18, size=3, show_guide=FALSE) +
+        ##geom_text(data=ppdf_means, aes(label=meaniqrdif, y = meaniqrdif+0.08)) +
+        #xlab("Nearest Neighbor (N)") + ylab("Mean IQR difference") +
+        #theme(axis.text.x = element_text(angle = 60, hjust = 1, size=6))
+
+    pppm <- ggplot(ppdf_means) + 
+        geom_point(aes(x=nearest_n, y=meaniqrdif)) + 
+        xlab("Matches (N)") + ylab("Mean IQR difference") +
+        ylim(min(ppdf_means%>% 
+                 dplyr::select(meaniqrdif) %>%
+                 unlist %>%
+                 as.vector) * 0.95 ,
+             max(ppdf_means%>%
+                 dplyr::select(meaniqrdif) %>%
+                 unlist %>%
+                 as.vector) * 1.05)+
+        #ylim(0.3,1)+
+        #scale_colour_manual(labels=c("95% IQR Coverage","50% IQR Coverage"), values=c("blue","red")) +
+        #scale_colour_manual(labels=c("50% IQR Coverage"), values=c("blue")) +
+        theme_bw() + theme(legend.position="none")
+
+    # - - - - - - - - - - - - - - - - - - - - - - #
+    # Weighted Total Score Plot
+    # - - - - - - - - - - - - - - - - - - - - - - #
+
+    wtspdf <- loocvperf(plotobj$loocv_res)
+
+    #wtsp <- ggplot(wtspdf %>% filter(totscore <= 3)) + 
+    wtsp <- ggplot(wtspdf) + 
+        geom_point(aes(x=nearest_n, y=totscore)) + 
+        xlab("Matches (N)") + ylab("Weighted Total Score") +
+        theme_bw() + theme(legend.position="none")
+
+
+
+        return(plot_grid(train_bias, train_cov, pppm, wtsp, labels="AUTO", ncol=2))
+
+    } else {
+
+        print("creating training calibration plot")
+        cptrainlist = plot_func(plotobj = plotobj, train=TRUE, filt=filt)
+        print("creating testing calibration plot")
+        cptestlist = plot_func(plotobj = plotobj, train=FALSE, filt=filt)
+
+        if(plot_zscore==FALSE){
+
+            minc <- floor(min(cptrainlist[[2]], cptestlist[[2]], na.rm=TRUE))
+            maxc <- ceiling(max(cptrainlist[[3]], cptestlist[[3]], na.rm=TRUE))
+
+            #labels
+            train_zs_lab <- paste0("zscore == ", cptrainlist$tp$zscore)
+            train_cov_lab <- paste0("coverage == ", cptrainlist$tp$coverage)
+            train_prec_lab <- paste0("precision == ", cptrainlist$tp$precision)
+
+            test_zs_lab <- paste0("zscore == ", round(cptestlist$tp$zscore, 4))
+            test_cov_lab <- paste0("coverage == ", round(cptestlist$tp$coverage, 4))
+            test_prec_lab <- paste0("precision == ", round(cptestlist$tp$precision,4))
+
+            # Calibration plots
+            cptrain <- cptrainlist[[1]] + xlim(minc, maxc) + ylim(minc,maxc) + 
+                #geom_text(aes(label=paste0(cptrainlist[[4]]), y=minc+(maxc-minc)/10+1, x=(minc+maxc)*0.6), parse= TRUE, color="red") +
+                geom_text(aes(label=paste0(train_zs_lab), y=minc+(maxc-minc)/10+(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="red") +
+                geom_text(aes(label=paste0(train_cov_lab), y=minc+(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="blue") +
+                geom_text(aes(label=paste0(train_prec_lab), y=minc+(maxc-minc)/10-(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="green")
+
+            cptest <- cptestlist[[1]] + xlim(minc, maxc) + ylim(minc,maxc) + 
+                #geom_text(aes(label=paste0(cptestlist[[4]]), y=minc+(maxc-minc)/10+1, x=(minc+maxc)*0.6), parse= TRUE, color="red")+
+                geom_text(aes(label=paste0(test_zs_lab), y=minc+(maxc-minc)/10+(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="red") +
+                geom_text(aes(label=paste0(test_cov_lab), y=minc+(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="blue") +
+                geom_text(aes(label=paste0(test_prec_lab), y=minc+(maxc-minc)/10-(maxc-minc)/10, x=(minc+maxc)*0.6), parse= TRUE, color="green")
+
+            return(plot_grid(cptrain, cptest, labels = "AUTO"))
+        
+        } else {
+
+            minc <- floor(min(cptrainlist[[6]], cptestlist[[6]], na.rm=TRUE))
+            maxc <- ceiling(max(cptrainlist[[7]], cptestlist[[7]], na.rm=TRUE))
+
+            # Calibration plots
+            cptrain <- cptrainlist[[5]] + xlim(minc, maxc) + ylim(minc,maxc) 
+            cptest <- cptestlist[[5]] + xlim(minc, maxc) + ylim(minc,maxc) 
+            return(plot_grid(cptrain, cptest, labels = "AUTO"))
+        
+        
+        }
+    
+    }
+    #return(plot_grid(cptrain, cptest, train_bias, train_cov, ppp, pppm, labels = "AUTO"))
+    
+}
+```
+
+
+
+
+# Other Outcomes
+
+Again we followed the steps as outline in the previous section with `tug` but now with `plusm`:
+
+1. Pre-process the data (broken stick modeling used for predicting outcome at time X; linear regression used for predictive mean matching)
+2. Find optimal nearest neighbor via fitting gamlss model within a  Leave One Out Cross-Validation framework
+3. Plot result of step 2.   
+
+Here is the dataset:
+
+```{r plusmdata}
+amp  <- import("./data/amp_data_test.csv")
+amp <- baselinemk(amp, "patient_id", "time")
+train <- amp %>% filter(train_test == 1)
+test <- amp %>% filter(train_test == 2)
+```
+
+
+### PreProcessing
+
+Let's take a look at the function specified as `preproc()`:
+
+```{r preprocres_plusm}
+test_proc <- preproc(
+                     dff=amp, 
+                     split_var = 'train_test', # train test split variable
+                     #split_var = 'source', # for all_tka dataset
+                     trainval = 1, # training set value
+                     testval = 2, # test set value
+                     knots_exp = c(0, 50, 181), # Specify broken stick knots
+                     out_time = 181,  # specify which timepoint to use 
+                     #outcome = "tug", # specify outcome variable name
+                     outcome = "plusm",
+                     time_var = "time", # specify time variable name
+                     pat_id = "patient_id", # specify patient id variable name
+                     varlist = c("age","gender","bmi"), # specify list of covariates for pmm
+                     filter_exp = NULL               
+)
+```
+
+### Nearest Neighbor Tuning using GAMLSS and LOOCV
+
+The run the cross-validation with the `plusm` as outcome:
+
+```{r loocvactual_plusm, eval=FALSE}
+fin <- loocv_function(nearest_n = seq(35,36,1),
+                      train_post = test_proc$train_post,
+                      ord_data = test_proc$train_o,
+                      outcome = "plusm",
+                      time_elapsed = "time",
+                      cs=TRUE,
+                      dfspec=TRUE,
+                      d_f_m=3, ptr_m=0.5,
+                      d_f_s=1,
+                      dist_fam = NO
+                      )
+```
+
+Since it takes a bit of time, I didn't evaluate the above code chunk but had it saved as a `.RDS` file. Let's see what it looks like:
+
+```{r loocvacteval_plusm}
+fin <- readRDS("./data/fin_NO_3536_cs_dfspec_plusm.RDS")
+str(fin, max.level=2)
+```
+
+The object created by running the `loocv_function()` contains information necessary for evaluation of the performance of the optimal nearest neighbor. There's a lot of information stored but basically the performance measures are stored in `fin$loocv_res$nearest_XX`:
+
+```{r loocvobjperf_plusm}
+str(fin$loocv_res$nearest_35, max.level = 1)
+```
+
+Using this object we can plot the performance results.
+
+### Performance Review
+
+
+Plotting the LOOCV result:
+
+```{r plot_calloocv_plusm}
+plot_cal(
+         # Specify plotobj which is the object saved from the loocv_func()
+         # if multiple distributes were used then specify the distribution (e.g. myfiles$BCCGo) otherwise specify just the object (e.g. fin)
+         #plotobj=myfiles$BCCGo,
+         plotobj=fin,
+         # specify the processed file to match test data and train data for calibration
+          test_proc=test_proc,
+         # specify calibration plot x 
+          pred_sum='mean',
+          # specify observed distribution to use (default = "median")
+          obs_dist="median"
+          )
+```
+
+Let's now plot the calibration plot:
+
+```{r plot_calcali_plusm}
+plot_cal(plotobj=fin,
+          test_proc=test_proc,
+          outcome = 'plusm',
+          pred_sum='mean',
+          obs_dist="median",
+          loocv = FALSE
+          )
+```

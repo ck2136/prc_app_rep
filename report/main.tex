@@ -1,0 +1,105 @@
+\documentclass[fleqn,10pt]{wlscirep}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{graphicx}
+\title{Development and testing of a nearest neighbors’ clinical prediction model for physical function after total knee arthroplasty}
+
+\author[1,*]{Andrew Kittelson}
+\author[1]{Tim Loar}
+\author[2,3,+]{Chong H. Kim}
+\author[2,+]{Kathryn Colborn}
+\author[4,+]{Stef van Buuren}
+\affil[1]{Department of Physical Medicine \& Rehabilitation, University of Colorado Physical Therapy Program, Aurora, USA}
+\affil[2]{Department of Biostatistics \& Informatics, University of Colorado, Aurora, USA}
+\affil[3]{Department of Clinical Pharmacy, University of Colorado, Aurora, USA}
+\affil[4]{Department of Methodology \& Statistics, University of Utrecht, Utrecht, The Netherlands}
+
+\affil[*]{andrew.kittleson@ucdenver.edu}
+
+\affil[+]{these authors contributed equally to this work}
+
+%\keywords{Total Knee Arthroscopy, Prediction model, Personalized reference chart}
+
+\begin{abstract}
+Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations. Example Abstract. Abstract must not include subheadings or citations.
+\end{abstract}
+
+
+%--------------------------------------------------------------------
+% PATH setup
+%--------------------------------------------------------------------
+\graphicspath{{../figure/}{./figure/}}
+
+
+%--------------------------------------------------------------------
+% knitr setup
+%--------------------------------------------------------------------
+
+
+\begin{document}
+
+\flushbottom
+\maketitle
+% * <john.hammersley@gmail.com> 2015-02-09T12:07:31.197Z:
+%
+%  Click the title above to edit the author information and abstract
+%
+\thispagestyle{empty}
+
+\noindent Please note: Abbreviations should be introduced at the first mention in the main text – no abbreviations lists. Suggested structure of main text (not enforced) is provided below.
+
+\section*{Introduction}
+
+
+\section*{Results}
+\subsection*{Descriptive statistics}
+
+In the training data set we analyzed information on 397 patients with 1,339 post-operative TUG observations. We used information information on 202 in the testing data. Patient characteristics from training and testing data are shown in Table \ref{tab:tab1}. Broadly, the ratio of male and BMI were similar across the two data sets while there were statistically significant difference in age and baseline TUG time. Compared to the patients in the training data, patients were approximately 2 years older and had a 1 second faster baseline TUG value on average. 
+
+
+
+
+
+\begin{table}
+
+\caption{\label{tab:tab1}\label{tab:tab1}Table 1. Baseline Characteristics of Training and Testing Set}
+\centering
+\resizebox{\linewidth}{!}{
+\begin{tabular}[t]{lccr}
+\toprule
+  & Train & Test & p^a\\ & (N = 397, \# TUG Obs = 1339) & (N = 202, \# TUG Obs = 604) &  \\
+\midrule
+
+Age (years) (mean (sd)) & 64.04 (8.43) & 65.90 (8.84) & 0.012\\
+Gender = Male (\%) & 185 (46.6) & 84 (41.6) & 0.280\\
+BMI (kg/m\textasciicircum{}2) (mean (sd)) & 31.33 (5.82) & 31.98 (6.20) & 0.208\\
+Baseline TUG (sec) (mean (sd)) & 9.98 (4.95) & 11.00 (5.04) & 0.018\\
+\bottomrule
+\multicolumn{4}{l}{\textsuperscript{a} Continuous variables tested with one-way analysis of variance; Categorical variables tested with}\\
+\multicolumn{4}{l}{$\chi^2$ test}\\
+\end{tabular}}
+\end{table}
+
+
+
+
+\subsection*{Nearest Neighbors Selection and Model Tuning}
+
+
+
+
+\subsubsection*{Matching characteristics}
+
+Based on the stepwise AIC method, age ($\beta = $ 3.70e-02; $\text{p} = $ 1.22e-03), gender ($\beta = $ 9.23e-01; $\text{p} = $ 1.21e-06), BMI ($\beta = $ 3.75e-02; $\text{p} = $ 2.20e-02), and baseline TUG ($\beta = $ 2.04e-01; $\text{p} = $ 2.54e-22) were selected as having statistically significant effect on 90-day post-operative TUG time via predictive mean matching. A change in 1 standard deviation of baseline TUG has 4.63 times the impact on 90-day post-operative TUG time than a 1 standard deviation change in BMI.
+
+\subsubsection*{Number of Matches}
+
+\begin{knitrout}
+\definecolor{shadecolor}{rgb}{0.969, 0.969, 0.969}\color{fgcolor}\begin{kframe}
+
+
+{\ttfamily\noindent\bfseries\color{errorcolor}{\#\# Error in gzfile(file, "{}rb"{}): cannot open the connection}}
+
+{\ttfamily\noindent\bfseries\color{errorcolor}{\#\# Error in names(myfiles) <- c("{}BCCGo"{}): object 'myfiles' not found}}\end{kframe}
+\end{knitrout}
+
